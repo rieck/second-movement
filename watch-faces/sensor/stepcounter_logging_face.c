@@ -52,6 +52,9 @@ static void _start_recording(stepcounter_logging_state_t *state)
     uint32_t ret = 0;
     printf("Starting recording (index: %d)\n", state->index);
 
+    /* Clear FIFO to avoid recording old data */
+    lis2dw_clear_fifo();
+
     /* Open log file */
     int err = lfs_file_open(&eeprom_filesystem, &state->file, LOG_FILE_NAME, LFS_O_WRONLY | LFS_O_CREAT | LFS_O_APPEND);
     if (err < 0) {
