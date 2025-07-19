@@ -130,7 +130,7 @@ static void _log_data(stepcounter_logging_state_t *state, lis2dw_fifo_t *fifo)
         }
 
         if (state->data_type & LOG_DATA_MAG) {
-            /* Write magnitude of readings (32bit) */
+            /* Write magnitude of readings (32bit). We are using abs instead of sq for efficiency */
             uint32_t mag = abs16(fifo->readings[cnt].x) + abs16(fifo->readings[cnt].y) + abs16(fifo->readings[cnt].z);
             ret = lfs_file_write(&lfs_fs, &state->file, &mag, sizeof(mag));
             if (ret != sizeof(mag))
