@@ -216,7 +216,7 @@ static void _display_state(stepcounter_logging_state_t *state)
     watch_date_time_t now = watch_rtc_get_date_time();
     uint32_t now_ts = watch_utility_date_time_to_unix_time(now, 0);
     uint32_t diff = now_ts - state->start_ts;
-    snprintf(buf, sizeof(buf), "R%5lu  ", diff);
+    snprintf(buf, sizeof(buf), "R%3lu  ", diff);
     watch_display_text_with_fallback(WATCH_POSITION_BOTTOM, buf, buf);
 }
 
