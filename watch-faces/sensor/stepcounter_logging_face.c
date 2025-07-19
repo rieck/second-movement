@@ -60,7 +60,7 @@ static void _start_recording(stepcounter_logging_state_t *state)
     lis2dw_clear_fifo();
 
     /* Open log file */
-    int err = lfs_file_open(&lfs, &state->file, LOG_FILE_NAME,
+    int err = lfs_file_open(&lfs_fs, &state->file, LOG_FILE_NAME,
                             LFS_O_WRONLY | LFS_O_CREAT | LFS_O_APPEND);
     if (err < 0) {
         state->error = ERROR_OPEN_FILE;
@@ -95,10 +95,8 @@ static void _stop_recording(stepcounter_logging_state_t *state)
         return;
     }
 
-    lfs_file_sync(&lfs_fs, &state->file);
-    uint32_t size = lfs_file_tell(&lfs_fs, &state->file);
-
     /* Close log file */
+    lfs_file_sync(&lfs_fs, &state->file);
     int err = lfs_file_close(&lfs_fs, &state->file);
     if (err < 0) {
         state->error = ERROR_CLOSE_FILE;
