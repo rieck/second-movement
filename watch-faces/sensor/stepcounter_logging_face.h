@@ -41,9 +41,10 @@
 #include "movement.h"
 #include "lfs.h"
 
-/* Mask for data type */
+/* Mask for data type and format */
 #define LOG_DATA_XYZ     0x01
 #define LOG_DATA_MAG     0x02
+#define LOG_DATA_L1      0x04
 
 typedef struct {
     lfs_file_t file;

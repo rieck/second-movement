@@ -45,10 +45,46 @@ extern lfs_t eeprom_filesystem;
 #define MAX_DURATION        100
 
 /* 16-bit absolute value */
-static inline int16_t abs16(int16_t x)
+static inline uint16_t fast_abs16(int16_t x)
 {
     int16_t mask = x >> 15;
     return (x + mask) ^ mask;
+}
+
+/* Approximate l2 norm of (x, y, z) */
+static inline uint32_t fast_l2_norm(lis2dw_reading_t reading)
+{
+    /* Absolute values */
+    uint16_t ax = fast_abs16(reading.x);
+    uint16_t ay = fast_abs16(reading.y);
+    uint16_t az = fast_abs16(reading.z);
+
+    /* Sort values: ax >= ay >= az */
+    if (ax < ay) {
+        uint16_t t = ax;
+        ax = ay;
+        ay = t;
+    }
+    if (ay < az) {
+        uint16_t t = ay;
+        ay = az;
+        az = t;
+    }
+    if (ax < ay) {
+        uint16_t t = ax;
+        ax = ay;
+        ay = t;
+    }
+
+    /* Approximate sqrt(x^2 + y^2 + z^2) */
+    /* alpha ≈ 0.9375 (15/16), beta ≈ 0.375 (3/8) */
+    return ax + ((15 * ay) >> 4) + ((3 * az) >> 3);
+}
+
+/* Simple l1 norm of (x, y, z) */
+static inline uint32_t fast_l1_norm(lis2dw_reading_t reading)
+{
+    return fast_abs16(reading.x) + fast_abs16(reading.y) + fast_abs16(reading.z);
 }
 
 static void _start_recording(stepcounter_logging_state_t *state)
@@ -120,7 +156,7 @@ static void _log_data(stepcounter_logging_state_t *state, lis2dw_fifo_t *fifo)
 
     for (uint8_t cnt = 0; cnt < fifo->count; cnt++) {
         if (state->data_type & LOG_DATA_XYZ) {
-            /* Write readings data (48bit) */
+            /* Store xyz data (3x16bit) */
             ret = 0;
             ret += lfs_file_write(&lfs_fs, &state->file, &fifo->readings[cnt].x, sizeof(fifo->readings[cnt].x));
             ret += lfs_file_write(&lfs_fs, &state->file, &fifo->readings[cnt].y, sizeof(fifo->readings[cnt].y));
@@ -130,10 +166,21 @@ static void _log_data(stepcounter_logging_state_t *state, lis2dw_fifo_t *fifo)
         }
 
         if (state->data_type & LOG_DATA_MAG) {
-            /* Write magnitude of readings (32bit). We are using abs instead of sq for efficiency */
-            uint32_t mag = abs16(fifo->readings[cnt].x) + abs16(fifo->readings[cnt].y) + abs16(fifo->readings[cnt].z);
-            ret = lfs_file_write(&lfs_fs, &state->file, &mag, sizeof(mag));
-            if (ret != sizeof(mag))
+            /* Store magnitude (24bit). */
+            uint32_t mag = 0;
+            if (state->data_type & LOG_DATA_L1)
+                mag = fast_l1_norm(fifo->readings[cnt]);
+            else
+                mag = fast_l2_norm(fifo->readings[cnt]);
+
+            /* Pack magnitude into 3-byte buffer (little-endian) */
+            uint8_t mag_buffer[3];
+            mag_buffer[0] = (uint8_t) ((mag >> 0) & 0xFF);      /* Least significant byte */
+            mag_buffer[1] = (uint8_t) ((mag >> 8) & 0xFF);      /* Middle byte */
+            mag_buffer[2] = (uint8_t) ((mag >> 16) & 0xFF);     /* Most significant byte */
+
+            ret = lfs_file_write(&lfs_fs, &state->file, mag_buffer, sizeof(mag_buffer));
+            if (ret != sizeof(mag_buffer))
                 goto error;
         }
     }
