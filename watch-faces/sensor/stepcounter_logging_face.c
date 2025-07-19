@@ -42,7 +42,7 @@ extern lfs_t eeprom_filesystem;
 #define ERROR_WRITE_HEADER  0x03
 #define ERROR_WRITE_SPACER  0x04
 #define ERROR_WRITE_DATA    0x05
-#define MAX_FILE_SIZE       0.9
+#define AVAIL_QUOTA         0.9
 
 /* 16-bit absolute value */
 static inline uint16_t fast_abs16(int16_t x)
@@ -222,7 +222,7 @@ static void _display_state(stepcounter_logging_state_t *state)
 
 static void _enforce_quota(stepcounter_logging_state_t *state)
 {
-    long int avail_quota = (long int) (filesystem_get_free_space() * MAX_FILE_SIZE);
+    long int avail_quota = (long int) (filesystem_get_free_space() * AVAIL_QUOTA);
     if (lfs_file_size(&lfs_fs, &state->file) > avail_quota) {
         _stop_recording(state);
     }
