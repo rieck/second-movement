@@ -32,6 +32,7 @@
 
 /* Access to file system */
 extern lfs_t eeprom_filesystem;
+#define lfs_fs (eeprom_filesystem)
 
 /* Constants*/
 #define LOG_FILE_NAME       "sc_log.bin"
@@ -43,9 +44,12 @@ extern lfs_t eeprom_filesystem;
 #define ERROR_WRITE_DATA    0x05
 #define MAX_DURATION        100
 
-/* Storage format */
-#define STORE_SQ_MAGNITUDE
-/* #define STORE_16_READINGS */
+/* 16-bit absolute value */
+static inline int16_t abs16(int16_t x)
+{
+    int16_t mask = x >> 15;
+    return (x + mask) ^ mask;
+}
 
 static void _start_recording(stepcounter_logging_state_t *state)
 {
@@ -56,7 +60,8 @@ static void _start_recording(stepcounter_logging_state_t *state)
     lis2dw_clear_fifo();
 
     /* Open log file */
-    int err = lfs_file_open(&eeprom_filesystem, &state->file, LOG_FILE_NAME, LFS_O_WRONLY | LFS_O_CREAT | LFS_O_APPEND);
+    int err = lfs_file_open(&lfs, &state->file, LOG_FILE_NAME,
+                            LFS_O_WRONLY | LFS_O_CREAT | LFS_O_APPEND);
     if (err < 0) {
         state->error = ERROR_OPEN_FILE;
         return;
@@ -68,9 +73,10 @@ static void _start_recording(stepcounter_logging_state_t *state)
     state->start_ts = now_ts;
 
     /* Write log header */
-    ret += lfs_file_write(&eeprom_filesystem, &state->file, &state->index, sizeof(state->index));
-    ret += lfs_file_write(&eeprom_filesystem, &state->file, &state->start_ts, sizeof(state->start_ts));
-    if (ret != sizeof(state->index) + sizeof(state->start_ts)) {
+    ret += lfs_file_write(&lfs_fs, &state->file, &state->index, sizeof(state->index));
+    ret += lfs_file_write(&lfs_fs, &state->file, &state->data_type, sizeof(state->data_type));
+    ret += lfs_file_write(&lfs_fs, &state->file, &state->start_ts, sizeof(state->start_ts));
+    if (ret != sizeof(state->index) + sizeof(state->start_ts) + sizeof(state->data_type)) {
         state->error = ERROR_WRITE_HEADER;
         return;
     }
@@ -83,19 +89,17 @@ static void _stop_recording(stepcounter_logging_state_t *state)
     printf("Stopping recording (index: %d)\n", state->index);
 
     /* Write spacer */
-    ret += lfs_file_write(&eeprom_filesystem, &state->file, &spacer, sizeof(spacer));
+    ret += lfs_file_write(&lfs_fs, &state->file, &spacer, sizeof(spacer));
     if (ret != sizeof(spacer)) {
         state->error = ERROR_WRITE_SPACER;
         return;
     }
 
-    lfs_file_sync(&eeprom_filesystem, &state->file);
-    printf("Synced log file\n");
-    uint32_t size = lfs_file_tell(&eeprom_filesystem, &state->file);
-    printf("File size: %lu\n", size);
+    lfs_file_sync(&lfs_fs, &state->file);
+    uint32_t size = lfs_file_tell(&lfs_fs, &state->file);
 
     /* Close log file */
-    int err = lfs_file_close(&eeprom_filesystem, &state->file);
+    int err = lfs_file_close(&lfs_fs, &state->file);
     if (err < 0) {
         state->error = ERROR_CLOSE_FILE;
         return;
@@ -112,30 +116,28 @@ static void _log_data(stepcounter_logging_state_t *state, lis2dw_fifo_t *fifo)
     printf("Logging data (%d measurements)\n", fifo->count);
 
     /* Store fifo count (8 bit) */
-    ret = lfs_file_write(&eeprom_filesystem, &state->file, &fifo->count, sizeof(fifo->count));
+    ret = lfs_file_write(&lfs_fs, &state->file, &fifo->count, sizeof(fifo->count));
     if (ret != sizeof(fifo->count))
         goto error;
 
     for (uint8_t cnt = 0; cnt < fifo->count; cnt++) {
-#ifdef STORE_16_READINGS
-        /* Write readings data (48bit) */
-        ret = 0;
-        ret += lfs_file_write(&eeprom_filesystem, &state->file, &fifo->readings[cnt].x, sizeof(fifo->readings[cnt].x));
-        ret += lfs_file_write(&eeprom_filesystem, &state->file, &fifo->readings[cnt].y, sizeof(fifo->readings[cnt].y));
-        ret += lfs_file_write(&eeprom_filesystem, &state->file, &fifo->readings[cnt].z, sizeof(fifo->readings[cnt].z));
-        if (ret != 3 * sizeof(fifo->readings[cnt].x))
-            goto error;
-#endif
+        if (state->data_type & LOG_DATA_XYZ) {
+            /* Write readings data (48bit) */
+            ret = 0;
+            ret += lfs_file_write(&lfs_fs, &state->file, &fifo->readings[cnt].x, sizeof(fifo->readings[cnt].x));
+            ret += lfs_file_write(&lfs_fs, &state->file, &fifo->readings[cnt].y, sizeof(fifo->readings[cnt].y));
+            ret += lfs_file_write(&lfs_fs, &state->file, &fifo->readings[cnt].z, sizeof(fifo->readings[cnt].z));
+            if (ret != 3 * sizeof(fifo->readings[cnt].x))
+                goto error;
+        }
 
-#ifdef STORE_SQ_MAGNITUDE
-        /* Write squared magnitude of readings (32bit) */
-        float mag = fifo->readings[cnt].x * fifo->readings[cnt].x +
-                    fifo->readings[cnt].y * fifo->readings[cnt].y +
-                    fifo->readings[cnt].z * fifo->readings[cnt].z;
-        ret = lfs_file_write(&eeprom_filesystem, &state->file, &mag, sizeof(mag));
-        if (ret != sizeof(mag))
-            goto error;
-#endif
+        if (state->data_type & LOG_DATA_MAG) {
+            /* Write magnitude of readings (32bit) */
+            uint32_t mag = abs16(fifo->readings[cnt].x) + abs16(fifo->readings[cnt].y) + abs16(fifo->readings[cnt].z);
+            ret = lfs_file_write(&lfs_fs, &state->file, &mag, sizeof(mag));
+            if (ret != sizeof(mag))
+                goto error;
+        }
     }
     return;
 
@@ -206,6 +208,7 @@ void stepcounter_logging_face_setup(uint8_t watch_face_index, void **context_ptr
 
     stepcounter_logging_state_t *state = (stepcounter_logging_state_t *) * context_ptr;
     state->index = 1;
+    state->data_type = LOG_DATA_MAG;
 }
 
 void stepcounter_logging_face_activate(void *context)

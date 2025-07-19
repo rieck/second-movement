@@ -41,9 +41,14 @@
 #include "movement.h"
 #include "lfs.h"
 
+/* Mask for data type */
+#define LOG_DATA_XYZ     0x01
+#define LOG_DATA_MAG     0x02
+
 typedef struct {
     lfs_file_t file;
     uint32_t start_ts;
+    uint8_t data_type;
     uint8_t index;
     uint8_t error;
 } stepcounter_logging_state_t;
