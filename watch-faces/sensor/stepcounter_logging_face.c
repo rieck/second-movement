@@ -220,6 +220,30 @@ static void _display_state(stepcounter_logging_state_t *state)
     watch_display_text_with_fallback(WATCH_POSITION_BOTTOM, buf, buf);
 }
 
+/* Print LIS2DW status */
+static void _print_lis2dw_status(void) 
+{
+    printf("LIS2DW status:\n");
+
+    uint8_t mode = lis2dw_get_mode();
+    printf("  Power mode:\t%d (0=LP, 1=HP, 2=On demand)\n", mode);
+
+    uint8_t data_rate = lis2dw_get_data_rate();
+    printf("  Data rate:\t%d (0=1.6Hz, 1=12.5Hz, 2=25Hz, 3=50Hz, ...)\n", data_rate);
+
+    uint8_t lp_mode = lis2dw_get_low_power_mode();
+    printf("  LP mode:\t%d (0=12-bit, 1-3=14-bit)\n", lp_mode);
+
+    uint8_t bw_filt = lis2dw_get_bandwidth_filtering();
+    printf("  BW filter:\t%d (0=ODR/2, 1=ODR/4, 2=ODR/10, 3=ODR/20)\n", bw_filt);
+
+    uint8_t range = lis2dw_get_range();
+    printf("  Range:\t%d (0=±2g, 1=±4g, 2=±8g, 3=±16g)\n", range);
+
+    uint8_t filter_type = lis2dw_get_filter_type();
+    printf("  Filter type:\t%d (0=LP, 1=HP)\n", filter_type);
+}
+
 void stepcounter_logging_face_setup(uint8_t watch_face_index, void **context_ptr)
 {
     (void) watch_face_index;
@@ -249,6 +273,7 @@ void stepcounter_logging_face_setup(uint8_t watch_face_index, void **context_ptr
          *  - Bandwidth filtering ODR/2 (6.25 Hz)
          *  - ±2g range
          */
+        _print_lis2dw_status();
     }
 
     stepcounter_logging_state_t *state = (stepcounter_logging_state_t *) * context_ptr;
