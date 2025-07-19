@@ -42,7 +42,7 @@ extern lfs_t eeprom_filesystem;
 #define ERROR_WRITE_HEADER  0x03
 #define ERROR_WRITE_SPACER  0x04
 #define ERROR_WRITE_DATA    0x05
-#define MAX_DURATION        100
+#define MAX_FILE_SIZE       0.9
 
 /* 16-bit absolute value */
 static inline uint16_t fast_abs16(int16_t x)
@@ -59,22 +59,12 @@ static inline uint32_t fast_l2_norm(lis2dw_reading_t reading)
     uint16_t ay = fast_abs16(reading.y);
     uint16_t az = fast_abs16(reading.z);
 
+    /* *INDENT-OFF* */
     /* Sort values: ax >= ay >= az */
-    if (ax < ay) {
-        uint16_t t = ax;
-        ax = ay;
-        ay = t;
-    }
-    if (ay < az) {
-        uint16_t t = ay;
-        ay = az;
-        az = t;
-    }
-    if (ax < ay) {
-        uint16_t t = ax;
-        ax = ay;
-        ay = t;
-    }
+    if (ax < ay) { uint16_t t = ax; ax = ay; ay = t; }
+    if (ay < az) { uint16_t t = ay; ay = az; az = t; }
+    if (ax < ay) { uint16_t t = ax; ax = ay; ay = t; }
+    /* *INDENT-ON* */
 
     /* Approximate sqrt(x^2 + y^2 + z^2) */
     /* alpha ≈ 0.9375 (15/16), beta ≈ 0.375 (3/8) */
@@ -87,10 +77,19 @@ static inline uint32_t fast_l1_norm(lis2dw_reading_t reading)
     return fast_abs16(reading.x) + fast_abs16(reading.y) + fast_abs16(reading.z);
 }
 
+/* Play beep sound */
+static inline void _beep()
+{
+    if (!movement_button_should_sound())
+        return;
+    watch_buzzer_play_note(BUZZER_NOTE_C7, 50);
+}
+
 static void _start_recording(stepcounter_logging_state_t *state)
 {
     uint32_t ret = 0;
     printf("Starting recording (index: %d)\n", state->index);
+    _beep();
 
     /* Clear FIFO to avoid recording old data */
     lis2dw_clear_fifo();
@@ -123,6 +122,7 @@ static void _stop_recording(stepcounter_logging_state_t *state)
     uint32_t ret = 0;
     int8_t spacer = LOG_FILE_SPACER;
     printf("Stopping recording (index: %d)\n", state->index);
+    _beep();
 
     /* Write spacer */
     ret += lfs_file_write(&lfs_fs, &state->file, &spacer, sizeof(spacer));
@@ -208,7 +208,7 @@ static void _display_state(stepcounter_logging_state_t *state)
 
     if (!state->start_ts) {
         int32_t free_space = filesystem_get_free_space();
-        snprintf(buf, sizeof(buf), "F %.4ld", free_space);
+        snprintf(buf, sizeof(buf), "F%5ld", free_space);
         watch_display_text_with_fallback(WATCH_POSITION_BOTTOM, buf, buf);
         return;
     }
@@ -216,12 +216,20 @@ static void _display_state(stepcounter_logging_state_t *state)
     watch_date_time_t now = watch_rtc_get_date_time();
     uint32_t now_ts = watch_utility_date_time_to_unix_time(now, 0);
     uint32_t diff = now_ts - state->start_ts;
-    snprintf(buf, sizeof(buf), "R %.4lu", diff);
+    snprintf(buf, sizeof(buf), "R%5lu  ", diff);
     watch_display_text_with_fallback(WATCH_POSITION_BOTTOM, buf, buf);
 }
 
+static void _enforce_quota(stepcounter_logging_state_t *state)
+{
+    long int avail_quota = (long int) (filesystem_get_free_space() * MAX_FILE_SIZE);
+    if (lfs_file_size(&lfs_fs, &state->file) > avail_quota) {
+        _stop_recording(state);
+    }
+}
+
 /* Print LIS2DW status */
-static void _print_lis2dw_status(void) 
+static void _print_lis2dw_status(void)
 {
     printf("LIS2DW status:\n");
 
@@ -301,15 +309,7 @@ bool stepcounter_logging_face_loop(movement_event_t event, void *context)
                 lis2dw_read_fifo(&fifo);
                 _log_data(state, &fifo);
                 lis2dw_clear_fifo();
-
-                watch_date_time_t now = watch_rtc_get_date_time();
-                uint32_t now_ts = watch_utility_date_time_to_unix_time(now, 0);
-                uint32_t diff = now_ts - state->start_ts;
-
-                /* Check if recording duration exceeds maximum */
-                if (diff > MAX_DURATION) {
-                    _stop_recording(state);
-                }
+                _enforce_quota(state);
             }
 
             _display_state(state);
