@@ -46,12 +46,19 @@
 #define LOG_DATA_MAG     0x02
 #define LOG_DATA_L1      0x04
 
+typedef enum {
+    PAGE_RECORDING,
+    PAGE_LABELING,
+} stepcounter_logging_page_t;
+
 typedef struct {
+    stepcounter_logging_page_t page;
     lfs_file_t file;
     uint32_t start_ts;
     uint8_t data_type;
     uint8_t index;
     uint8_t error;
+    uint16_t steps;
 } stepcounter_logging_state_t;
 
 void stepcounter_logging_face_setup(uint8_t watch_face_index, void **context_ptr);

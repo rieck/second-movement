@@ -85,6 +85,28 @@ static inline void _beep()
     watch_buzzer_play_note(BUZZER_NOTE_C7, 50);
 }
 
+/* Open log file */
+static void _log_open(stepcounter_logging_state_t *state)
+{
+    int err = lfs_file_open(&lfs_fs, &state->file, LOG_FILE_NAME,
+                            LFS_O_WRONLY | LFS_O_CREAT | LFS_O_APPEND);
+    if (err < 0) {
+        state->error = ERROR_OPEN_FILE;
+        return;
+    }
+}
+
+/* Close log file */
+static void _log_close(stepcounter_logging_state_t *state)
+{
+    lfs_file_sync(&lfs_fs, &state->file);
+    int err = lfs_file_close(&lfs_fs, &state->file);
+    if (err < 0) {
+        state->error = ERROR_CLOSE_FILE;
+        return;
+    }
+}
+
 static void _start_recording(stepcounter_logging_state_t *state)
 {
     uint32_t ret = 0;
@@ -93,14 +115,7 @@ static void _start_recording(stepcounter_logging_state_t *state)
 
     /* Clear FIFO to avoid recording old data */
     lis2dw_clear_fifo();
-
-    /* Open log file */
-    int err = lfs_file_open(&lfs_fs, &state->file, LOG_FILE_NAME,
-                            LFS_O_WRONLY | LFS_O_CREAT | LFS_O_APPEND);
-    if (err < 0) {
-        state->error = ERROR_OPEN_FILE;
-        return;
-    }
+    _log_open(state);
 
     /* Initialize log index and start time */
     watch_date_time_t now = watch_rtc_get_date_time();
@@ -130,14 +145,7 @@ static void _stop_recording(stepcounter_logging_state_t *state)
         state->error = ERROR_WRITE_SPACER;
         return;
     }
-
-    /* Close log file */
-    lfs_file_sync(&lfs_fs, &state->file);
-    int err = lfs_file_close(&lfs_fs, &state->file);
-    if (err < 0) {
-        state->error = ERROR_CLOSE_FILE;
-        return;
-    }
+    _log_close(state);
 
     /* Update log index and reset time */
     state->index++;
@@ -191,14 +199,47 @@ static void _log_data(stepcounter_logging_state_t *state, lis2dw_fifo_t *fifo)
     return;
 }
 
-static void _display_state(stepcounter_logging_state_t *state)
+static void _log_steps(stepcounter_logging_state_t *state)
+{
+    uint32_t ret = 0;
+    int err;
+    printf("Steps in recording: %d\n", state->steps);
+
+    _log_open(state);
+    ret = lfs_file_write(&lfs_fs, &state->file, &state->steps, sizeof(state->steps));
+    if (ret != sizeof(state->steps)) {
+        state->error = ERROR_WRITE_DATA;
+        return;
+    }
+    _log_close(state);
+
+    /* Reset steps */
+    state->steps = 0;
+}
+
+static void _labeling_display(stepcounter_logging_state_t *state, uint8_t subsecond)
 {
     char buf[10];
 
     watch_clear_colon();
-    snprintf(buf, sizeof(buf), "%d", state->index);
+    watch_display_text_with_fallback(WATCH_POSITION_TOP, "STEPS", "SC");
+    snprintf(buf, sizeof(buf), "%4d  ", state->steps);
+
+    /* Blink the steps counter */
+    if (subsecond % 2 == 1)
+        snprintf(buf, sizeof(buf), "      ");
+
+    watch_display_text_with_fallback(WATCH_POSITION_BOTTOM, buf, buf);
+}
+
+static void _recording_display(stepcounter_logging_state_t *state)
+{
+    char buf[10];
+
+    watch_clear_colon();
+    snprintf(buf, sizeof(buf), "%2d", state->index);
     watch_display_text_with_fallback(WATCH_POSITION_TOP_RIGHT, buf, buf);
-    watch_display_text_with_fallback(WATCH_POSITION_TOP_LEFT, "SL", "SL");
+    watch_display_text_with_fallback(WATCH_POSITION_TOP_LEFT, "SL ", "SL");
 
     if (state->error) {
         snprintf(buf, sizeof(buf), "E %.2d  ", state->error);
@@ -220,12 +261,95 @@ static void _display_state(stepcounter_logging_state_t *state)
     watch_display_text_with_fallback(WATCH_POSITION_BOTTOM, buf, buf);
 }
 
+static void _switch_to_labeling(stepcounter_logging_state_t *state)
+{
+    /* Switch to labeling page */
+    movement_request_tick_frequency(4);
+    state->page = PAGE_LABELING;
+    _labeling_display(state, 0);
+    _beep();
+}
+
+static void _switch_to_recording(stepcounter_logging_state_t *state)
+{
+    /* Switch to recording page */
+    movement_request_tick_frequency(1);
+    state->page = PAGE_RECORDING;
+    _recording_display(state);
+    _beep();
+}
+
+
 static void _enforce_quota(stepcounter_logging_state_t *state)
 {
     long int avail_quota = (long int) (filesystem_get_free_space() * AVAIL_QUOTA);
     if (lfs_file_size(&lfs_fs, &state->file) > avail_quota) {
         _stop_recording(state);
+        _switch_to_labeling(state);
     }
+}
+
+bool _recording_loop(movement_event_t event, void *context)
+{
+    stepcounter_logging_state_t *state = (stepcounter_logging_state_t *) context;
+    lis2dw_fifo_t fifo;
+
+    switch (event.event_type) {
+        case EVENT_ACTIVATE:
+            _recording_display(state);
+            break;
+        case EVENT_TICK:
+            if (state->start_ts) {
+                lis2dw_read_fifo(&fifo);
+                _log_data(state, &fifo);
+                lis2dw_clear_fifo();
+                _enforce_quota(state);
+            }
+            _recording_display(state);
+            break;
+        case EVENT_ALARM_BUTTON_DOWN:
+            if (!state->start_ts) {
+                _start_recording(state);
+                _recording_display(state);
+            } else {
+                _stop_recording(state);
+                _switch_to_labeling(state);
+            }
+            break;
+        default:
+            movement_default_loop_handler(event);
+            break;
+    }
+
+    return true;
+}
+
+bool _labeling_loop(movement_event_t event, void *context)
+{
+    stepcounter_logging_state_t *state = (stepcounter_logging_state_t *) context;
+
+    switch (event.event_type) {
+        case EVENT_ACTIVATE:
+        case EVENT_TICK:
+            _labeling_display(state, event.subsecond);
+            break;
+        case EVENT_LIGHT_BUTTON_DOWN:
+            state->steps = (state->steps > 10) ? state->steps - 10 : 0;
+            _labeling_display(state, event.subsecond);
+            break;
+        case EVENT_ALARM_BUTTON_DOWN:
+            state->steps++;
+            _labeling_display(state, event.subsecond);
+            break;
+        case EVENT_MODE_BUTTON_UP:
+            _log_steps(state);
+            _switch_to_recording(state);
+            break;
+        default:
+            movement_default_loop_handler(event);
+            break;
+    }
+    return true;
 }
 
 /* Print LIS2DW status */
@@ -292,48 +416,28 @@ void stepcounter_logging_face_setup(uint8_t watch_face_index, void **context_ptr
 void stepcounter_logging_face_activate(void *context)
 {
     stepcounter_logging_state_t *state = (stepcounter_logging_state_t *) context;
-    _display_state(state);
+    _recording_display(state);
 }
 
 bool stepcounter_logging_face_loop(movement_event_t event, void *context)
 {
     stepcounter_logging_state_t *state = (stepcounter_logging_state_t *) context;
-    lis2dw_fifo_t fifo;
 
-    switch (event.event_type) {
-        case EVENT_ACTIVATE:
-            _display_state(state);
-            break;
-        case EVENT_TICK:
-            if (state->start_ts) {
-                lis2dw_read_fifo(&fifo);
-                _log_data(state, &fifo);
-                lis2dw_clear_fifo();
-                _enforce_quota(state);
-            }
-
-            _display_state(state);
-            break;
-        case EVENT_ALARM_BUTTON_DOWN:
-            if (!state->start_ts)
-                _start_recording(state);
-            else
-                _stop_recording(state);
-            _display_state(state);
-            break;
-        default:
-            movement_default_loop_handler(event);
-            break;
+    switch (state->page) {
+        case PAGE_RECORDING:
+            return _recording_loop(event, context);
+        case PAGE_LABELING:
+            return _labeling_loop(event, context);
     }
-
-    return true;
 }
 
 void stepcounter_logging_face_resign(void *context)
 {
     stepcounter_logging_state_t *state = (stepcounter_logging_state_t *) context;
-    if (state->start_ts)
+    if (state->start_ts) {
         _stop_recording(state);
+        _labeling_display(state, 0);
+    }
 }
 
 movement_watch_face_advisory_t stepcounter_logging_face_advise(void *context)
