@@ -29,20 +29,23 @@
 #include "watch_utility.h"
 #include "filesystem.h"
 #include "lfs.h"
+#include "lis2dw_monitor_face.h"
 
 /* Access to file system */
 extern lfs_t eeprom_filesystem;
 #define lfs_fs (eeprom_filesystem)
 
 /* Constants*/
-#define LOG_FILE_NAME       "sc_log.bin"
+#define LOG_FILE_NAME       "log.scl"
 #define LOG_FILE_MARKER     0xff
+#define LOG_MAGIC_BYTES     0x4223
+#define LOG_VERSION         0x01
 #define ERROR_OPEN_FILE     0x01
 #define ERROR_READ_FILE     0x02
 #define ERROR_WRITE_HEADER  0x03
 #define ERROR_WRITE_DATA    0x05
 #define ERROR_ALLOC_MEM     0x06
-#define AVAIL_QUOTA         0.9
+#define MIN_FS_SPACE        256
 
 /* Chirp state */
 static uint8_t *chirp_data_ptr;
@@ -114,7 +117,7 @@ static void _log_close(stepcounter_logging_state_t *state)
 
 static void _start_recording(stepcounter_logging_state_t *state)
 {
-    uint32_t ret = 0;
+    uint32_t ret = 0, expected_size = 0;
     printf("Starting recording (index: %d)\n", state->index);
     _beep();
 
@@ -128,10 +131,24 @@ static void _start_recording(stepcounter_logging_state_t *state)
     state->start_ts = now_ts;
 
     /* Write log header */
-    ret += lfs_file_write(&lfs_fs, &state->file, &state->index, sizeof(state->index));
+    uint16_t magic = LOG_MAGIC_BYTES;
+    ret += lfs_file_write(&lfs_fs, &state->file, &magic, sizeof(magic));
+    uint8_t version = LOG_VERSION;
+    ret += lfs_file_write(&lfs_fs, &state->file, &version, sizeof(version));
+    expected_size += sizeof(magic) + sizeof(version);
+
+    /* Write sensor state and config */
+    lis2dw_device_state_t device_state;
+    lis2dw_get_state(&device_state);
+    ret += lfs_file_write(&lfs_fs, &state->file, &device_state, sizeof(device_state));
     ret += lfs_file_write(&lfs_fs, &state->file, &state->data_type, sizeof(state->data_type));
+    expected_size += sizeof(device_state) + sizeof(state->data_type);
+
+    /* Write index and start time */
+    ret += lfs_file_write(&lfs_fs, &state->file, &state->index, sizeof(state->index));
     ret += lfs_file_write(&lfs_fs, &state->file, &state->start_ts, sizeof(state->start_ts));
-    if (ret != sizeof(state->index) + sizeof(state->start_ts) + sizeof(state->data_type)) {
+    expected_size += sizeof(state->index) + sizeof(state->start_ts);
+    if (ret != expected_size) {
         state->error = ERROR_WRITE_HEADER;
         return;
     }
@@ -385,14 +402,13 @@ static void _recording_display(stepcounter_logging_state_t *state)
     watch_display_text_with_fallback(WATCH_POSITION_TOP_RIGHT, buf, buf);
     watch_display_text_with_fallback(WATCH_POSITION_TOP_LEFT, "REC", "RE");
 
+    int32_t free_space = filesystem_get_free_space();
     if (state->error) {
         snprintf(buf, sizeof(buf), "E %.2d  ", state->error);
     } else if (!state->start_ts) {
-        int32_t free_space = filesystem_get_free_space();
         snprintf(buf, sizeof(buf), "F%5ld", free_space);
     } else {
-        int32_t file_size = lfs_file_size(&lfs_fs, &state->file);
-        snprintf(buf, sizeof(buf), "R%5lu  ", file_size);
+        snprintf(buf, sizeof(buf), "R%5ld", free_space);
     }
 
     watch_display_text_with_fallback(WATCH_POSITION_BOTTOM, buf, buf);
@@ -428,8 +444,7 @@ static void _switch_to_chirping(stepcounter_logging_state_t *state)
 
 static void _enforce_quota(stepcounter_logging_state_t *state)
 {
-    long int avail_quota = (long int) (filesystem_get_free_space() * AVAIL_QUOTA);
-    if (lfs_file_size(&lfs_fs, &state->file) > avail_quota) {
+    if (filesystem_get_free_space() < MIN_FS_SPACE) {
         _stop_recording(state);
         _switch_to_labeling(state);
     }

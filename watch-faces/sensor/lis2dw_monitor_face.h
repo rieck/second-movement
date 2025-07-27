@@ -72,6 +72,9 @@ bool lis2dw_monitor_face_loop(movement_event_t event, void *context);
 void lis2dw_monitor_face_resign(void *context);
 movement_watch_face_advisory_t lis2dw_monitor_face_advise(void *context);
 
+/* Function for other watch faces to get the state of the LIS2DW12 sensor. */
+void lis2dw_get_state(lis2dw_device_state_t *ds);
+
 #define lis2dw_monitor_face ((const watch_face_t){ \
     lis2dw_monitor_face_setup, \
     lis2dw_monitor_face_activate, \

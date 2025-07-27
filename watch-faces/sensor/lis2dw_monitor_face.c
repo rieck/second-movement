@@ -358,7 +358,7 @@ static void _lis2dw_print_state(lis2dw_device_state_t *ds)
     printf("\n");
 }
 
-static void _lis2dw_get_state(lis2dw_device_state_t *ds)
+void lis2dw_get_state(lis2dw_device_state_t *ds)
 {
     ds->mode = lis2dw_get_mode();
     ds->data_rate = lis2dw_get_data_rate();
@@ -577,7 +577,7 @@ void lis2dw_monitor_face_activate(void *context)
     lis2dw_clear_fifo();
 
     /* Print lis2dw status to console. */
-    _lis2dw_get_state(&state->ds);
+    lis2dw_get_state(&state->ds);
     _lis2dw_print_state(&state->ds);
 
     /* Switch to monitor page. */
