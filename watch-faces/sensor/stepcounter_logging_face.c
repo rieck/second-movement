@@ -45,7 +45,7 @@ extern lfs_t eeprom_filesystem;
 #define ERROR_WRITE_HEADER  0x03
 #define ERROR_WRITE_DATA    0x05
 #define ERROR_ALLOC_MEM     0x06
-#define MIN_FS_SPACE        256
+#define MIN_FS_SPACE        512 // Small remaining space
 
 /* Chirp state */
 static uint8_t *chirp_data_ptr;
@@ -498,11 +498,11 @@ static bool _labeling_loop(movement_event_t event, void *context)
             _labeling_display(state, event.subsecond);
             break;
         case EVENT_LIGHT_BUTTON_DOWN:
-            state->steps = (state->steps > 10) ? state->steps - 10 : 0;
+            state->steps = (state->steps > 0) ? state->steps - 1 : 0;
             _labeling_display(state, event.subsecond);
             break;
         case EVENT_ALARM_BUTTON_DOWN:
-            state->steps++;
+            state->steps += 10;
             _labeling_display(state, event.subsecond);
             break;
         case EVENT_MODE_BUTTON_UP:
@@ -568,7 +568,7 @@ void stepcounter_logging_face_setup(uint8_t watch_face_index, void **context_ptr
 
     stepcounter_logging_state_t *state = (stepcounter_logging_state_t *) * context_ptr;
     state->index = 1;
-    state->data_type = LOG_DATA_MAG;
+    state->data_type = LOG_DATA_MAG | LOG_DATA_L1;
     state->page = PAGE_RECORDING;
 }
 
