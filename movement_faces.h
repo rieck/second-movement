@@ -62,5 +62,6 @@
 #include "tally_face.h"
 #include "probability_face.h"
 #include "ke_decimal_time_face.h"
+#include "lis2dw_monitor_face.h"
 #include "stepcounter_logging_face.h"
 // New includes go above this line.
