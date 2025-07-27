@@ -29,6 +29,7 @@
 
 const watch_face_t watch_faces[] = {
     clock_face,
+    lis2dw_monitor_face,
     stepcounter_logging_face,
     stopwatch_face,
     voltage_face,
