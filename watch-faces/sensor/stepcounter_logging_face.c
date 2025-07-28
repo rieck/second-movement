@@ -568,7 +568,7 @@ void stepcounter_logging_face_setup(uint8_t watch_face_index, void **context_ptr
 
     stepcounter_logging_state_t *state = (stepcounter_logging_state_t *) * context_ptr;
     state->index = 1;
-    state->data_type = LOG_DATA_MAG | LOG_DATA_L1;
+    state->data_type = LOG_DATA_MAG; // | LOG_DATA_L1;
     state->page = PAGE_RECORDING;
 }
 
@@ -577,6 +577,7 @@ void stepcounter_logging_face_activate(void *context)
     stepcounter_logging_state_t *state = (stepcounter_logging_state_t *) context;
     state->error = 0;
     lis2dw_enable_fifo();
+
     _recording_display(state);
 }
 
