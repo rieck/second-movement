@@ -23,16 +23,30 @@
  */
 
 #include "movement.h"
+#include "watch_utility.h"
 
-
+/* Main pages of watch face*/
 typedef enum {
     PAGE_COUNTER,
     PAGE_SETTINGS,
 } step_counter_page_t;
 
+/* Setting display and advance functions */
+typedef struct {
+    void (*display)(void *, uint8_t);
+    void (*advance)(void *);
+} step_counter_settings_t;
+
 typedef struct {
     uint32_t steps;             /* Number of steps taken */
     step_counter_page_t page;   /* Displayed page */
+    /* Main parameters for detection */
+    uint16_t threshold;         /* Threshold for step detection */
+    uint8_t min_steps;          /* Minimum time between steps */
+    uint8_t max_steps;          /* Maximum time between steps */
+    /* Flexible settings */
+    step_counter_settings_t *settings;  /* Settings config */
+    uint8_t settings_page:3;    /* Subpage in settings */
 } step_counter_state_t;
 
 void step_counter_face_setup(uint8_t watch_face_index, void **context_ptr);
