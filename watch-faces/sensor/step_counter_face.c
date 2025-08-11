@@ -29,10 +29,11 @@
 
 /* Settings pages */
 #define NUM_SETTINGS 3
+
 /* Default settings */
 #define DEFAULT_THRESHOLD 26500
-#define DEFAULT_MIN_STEPS 0     /* 0 = disabled */
-#define DEFAULT_MAX_STEPS 0     /* 0 = disabled */
+#define DEFAULT_MIN_STEPS 0    /* 0 = disabled */
+#define DEFAULT_MAX_STEPS 0    /* 0 = disabled */
 
 static inline void _beep()
 {
@@ -172,13 +173,109 @@ static void _switch_to_settings(step_counter_state_t *state)
     state->settings[state->settings_page].display(state, 0);
 }
 
+/* Reset state to default */
+static void _reset_state(step_counter_state_t *state)
+{
+    state->subticks = 0;
+    state->steps = 0;
+    state->above_threshold = false;
+    state->last_steps[0] = -state->min_steps;
+    state->last_steps[1] = -state->min_steps;
+}
+
+/* Approximate l2 norm */
+static uint32_t _approx_l2_norm(lis2dw_reading_t reading)
+{
+    /* Absolute values */
+    uint32_t ax = abs(reading.x);
+    uint32_t ay = abs(reading.y);
+    uint32_t az = abs(reading.z);
+
+    /* *INDENT-OFF* */
+    /* Sort values: ax >= ay >= az */
+    if (ax < ay) { uint32_t t = ax; ax = ay; ay = t; }
+    if (ay < az) { uint32_t t = ay; ay = az; az = t; }
+    if (ax < ay) { uint32_t t = ax; ax = ay; ay = t; }
+    /* *INDENT-ON* */
+
+    /* Approximate sqrt(x^2 + y^2 + z^2) */
+    /* alpha ≈ 0.9375 (15/16), beta ≈ 0.375 (3/8) */
+    return ax + ((15 * ay) >> 4) + ((3 * az) >> 3);
+}
+
+static void _detect_steps(step_counter_state_t *state)
+{
+    lis2dw_fifo_t fifo;
+    bool step_too_short, step1_too_long, step2_too_long;
+
+    lis2dw_read_fifo(&fifo);
+    if (fifo.count == 0) {
+        return;
+    }
+
+    for (uint8_t i = 0; i < fifo.count; i++) {
+
+        /* Calculate magnitude of acceleration */
+        uint32_t mag = _approx_l2_norm(fifo.readings[i]);
+
+        /* Check if we are crossing the threshold upward */
+        if (mag > state->threshold && !state->above_threshold) {
+            /* Check if enough time has passed since last step */
+            if (state->min_steps > 0) {
+                step_too_short = (state->subticks - state->last_steps[0]) < state->min_steps;
+            } else {
+                step_too_short = false; 
+            }
+
+            if (!step_too_short) {
+                /* Count step*/
+                state->steps++;
+                state->above_threshold = true;
+
+                /* Shift step history: new step becomes most recent */
+                state->last_steps[1] = state->last_steps[0];
+                state->last_steps[0] = state->subticks;
+            } 
+        }
+        /* Reset threshold flag when magnitude drops below threshold */
+        else if (mag < state->threshold && state->above_threshold) {
+            state->above_threshold = false;
+        }
+
+        /* Check if we should remove a step due to timing constraints */
+        if (state->max_steps > 0) {
+            step1_too_long = (state->subticks - state->last_steps[0]) > state->max_steps;
+            step2_too_long = (state->last_steps[0] - state->last_steps[1]) > state->max_steps;
+
+            if (step1_too_long && step2_too_long) {
+                printf("Step too long\n");
+                state->steps--;
+                state->last_steps[0] = state->last_steps[1];
+            }
+        }
+
+        /* Increment subticks */
+        state->subticks += 1;
+    }
+
+    lis2dw_clear_fifo();
+}
+
 static bool _counter_loop(movement_event_t event, void *context)
 {
     step_counter_state_t *state = (step_counter_state_t *) context;
+    watch_date_time_t now;
 
     switch (event.event_type) {
         case EVENT_ACTIVATE:
+            _counter_display(state);
+            break;
         case EVENT_TICK:
+            now = movement_get_local_date_time();
+            if (now.unit.hour == 0 && now.unit.minute == 0 && now.unit.second == 0) {
+                _reset_state(state);
+            }
+            _detect_steps(state);
             _counter_display(state);
             break;
         case EVENT_LIGHT_LONG_PRESS:
@@ -221,6 +318,7 @@ static bool _settings_loop(movement_event_t event, void *context)
             break;
         case EVENT_MODE_BUTTON_UP:
             /* Exit settings and return to step counter */
+            _reset_state(state);
             _switch_to_counter(state);
             _beep();
             break;
@@ -234,30 +332,44 @@ static bool _settings_loop(movement_event_t event, void *context)
 void step_counter_face_setup(uint8_t watch_face_index, void **context_ptr)
 {
     (void) watch_face_index;
+    step_counter_state_t *state;
+
+    /* Initialize state */
     if (*context_ptr == NULL) {
         *context_ptr = malloc(sizeof(step_counter_state_t));
         memset(*context_ptr, 0, sizeof(step_counter_state_t));
-    }
-    step_counter_state_t *state = (step_counter_state_t *) * context_ptr;
+        state = (step_counter_state_t *) *context_ptr;
 
-    /* Default setup */
-    state->steps = 0;
-    state->threshold = DEFAULT_THRESHOLD;
-    state->min_steps = DEFAULT_MIN_STEPS;
-    state->max_steps = DEFAULT_MAX_STEPS;
+        /* Default setup */
+        state->threshold = DEFAULT_THRESHOLD;
+        state->min_steps = DEFAULT_MIN_STEPS;
+        state->max_steps = DEFAULT_MAX_STEPS;
+    
+        /* Reset state */
+        _reset_state(state);    
+    }
 
     /* Initialize settings */
-    uint8_t settings_page = 0;
-    state->settings = malloc(NUM_SETTINGS * sizeof(step_counter_settings_t));
-    state->settings[settings_page].display = _settings_threshold_display;
-    state->settings[settings_page].advance = _settings_threshold_advance;
-    settings_page++;
-    state->settings[settings_page].display = _settings_min_steps_display;
-    state->settings[settings_page].advance = _settings_min_steps_advance;
-    settings_page++;
-    state->settings[settings_page].display = _settings_max_steps_display;
-    state->settings[settings_page].advance = _settings_max_steps_advance;
-    settings_page++;
+    state = (step_counter_state_t *) *context_ptr;
+    if (state->settings == NULL) {
+        uint8_t settings_page = 0;
+        state->settings = malloc(NUM_SETTINGS * sizeof(step_counter_settings_t));
+        state->settings[settings_page].display = _settings_threshold_display;
+        state->settings[settings_page].advance = _settings_threshold_advance;
+        settings_page++;
+        state->settings[settings_page].display = _settings_min_steps_display;
+        state->settings[settings_page].advance = _settings_min_steps_advance;
+        settings_page++;
+        state->settings[settings_page].display = _settings_max_steps_display;
+        state->settings[settings_page].advance = _settings_max_steps_advance;
+    }
+
+    /* Set up accelerometer */
+    movement_set_accelerometer_background_rate(LIS2DW_DATA_RATE_12_5_HZ);
+
+    /* Enable fifo and clear it. */
+    lis2dw_enable_fifo();
+    lis2dw_clear_fifo();
 }
 
 void step_counter_face_activate(void *context)

@@ -40,7 +40,11 @@ typedef struct {
 typedef struct {
     uint32_t steps;             /* Number of steps taken */
     step_counter_page_t page;   /* Displayed page */
-    /* Main parameters for detection */
+    /* State for step detection */
+    uint32_t subticks;          /* Subticks for timing */
+    uint32_t last_steps[2];     /* History of last two steps */
+    bool above_threshold;       /* Reading is above the threshold */
+    /* Parameters for step detection */
     uint16_t threshold;         /* Threshold for step detection */
     uint8_t min_steps;          /* Minimum time between steps */
     uint8_t max_steps;          /* Maximum time between steps */
