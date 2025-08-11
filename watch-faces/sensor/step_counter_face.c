@@ -146,9 +146,9 @@ static void _counter_display(step_counter_state_t *state)
 
     /* Display step count */
     if (state->steps < 10000) {
-        snprintf(buf, sizeof(buf), "%4d  ", state->steps);
+        snprintf(buf, sizeof(buf), "%4lu  ", state->steps);
     } else {
-        snprintf(buf, sizeof(buf), "%6d", state->steps);
+        snprintf(buf, sizeof(buf), "%6lu", state->steps % 1000000);
     }
     watch_display_text_with_fallback(WATCH_POSITION_BOTTOM, buf, buf);
 }
