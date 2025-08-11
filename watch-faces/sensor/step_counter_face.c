@@ -80,8 +80,8 @@ static void _settings_threshold_advance(void *context)
     /* Increment threshold by 500, with reasonable bounds */
     state->threshold += 500;
 
-    /* Empirically determined bounds (22000 is about 1g) */
-    if (state->threshold > 30000) {
+    /* Empirically determined bounds (22000 ~ 1g and 33000 ~ 1.5g) */
+    if (state->threshold > 33000) {
         state->threshold = 22000;
     }
 }
