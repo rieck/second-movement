@@ -32,8 +32,8 @@
 
 /* Default settings */
 #define DEFAULT_THRESHOLD 26500
-#define DEFAULT_MIN_STEPS 0    /* 0 = disabled */
-#define DEFAULT_MAX_STEPS 0    /* 0 = disabled */
+#define DEFAULT_MIN_STEPS 0     /* 0 = disabled */
+#define DEFAULT_MAX_STEPS 0     /* 0 = disabled */
 
 static inline void _beep()
 {
@@ -203,6 +203,20 @@ static uint32_t _approx_l2_norm(lis2dw_reading_t reading)
     return ax + ((15 * ay) >> 4) + ((3 * az) >> 3);
 }
 
+/* Print lis2dw status to console. */
+static void _lis2dw_print_state(void)
+{
+    printf("LIS2DW status:\n");
+    printf("  Power mode:\t%x\n", lis2dw_get_mode());
+    printf("  Data rate:\t%x\n", lis2dw_get_data_rate());
+    printf("  LP mode:\t%x\n", lis2dw_get_low_power_mode());
+    printf("  BW filter:\t%x\n", lis2dw_get_bandwidth_filtering());
+    printf("  Range:\t%x \n", lis2dw_get_range());
+    printf("  Filter type:\t%x\n", lis2dw_get_filter_type());
+    printf("  Low noise:\t%x\n", lis2dw_get_low_noise_mode());
+    printf("\n");
+}
+
 static void _detect_steps(step_counter_state_t *state)
 {
     lis2dw_fifo_t fifo;
@@ -224,18 +238,18 @@ static void _detect_steps(step_counter_state_t *state)
             if (state->min_steps > 0) {
                 step_too_short = (state->subticks - state->last_steps[0]) < state->min_steps;
             } else {
-                step_too_short = false; 
+                step_too_short = false;
             }
 
             if (!step_too_short) {
-                /* Count step*/
+                /* Count step */
                 state->steps++;
                 state->above_threshold = true;
 
                 /* Shift step history: new step becomes most recent */
                 state->last_steps[1] = state->last_steps[0];
                 state->last_steps[0] = state->subticks;
-            } 
+            }
         }
         /* Reset threshold flag when magnitude drops below threshold */
         else if (mag < state->threshold && state->above_threshold) {
@@ -338,19 +352,19 @@ void step_counter_face_setup(uint8_t watch_face_index, void **context_ptr)
     if (*context_ptr == NULL) {
         *context_ptr = malloc(sizeof(step_counter_state_t));
         memset(*context_ptr, 0, sizeof(step_counter_state_t));
-        state = (step_counter_state_t *) *context_ptr;
+        state = (step_counter_state_t *) * context_ptr;
 
         /* Default setup */
         state->threshold = DEFAULT_THRESHOLD;
         state->min_steps = DEFAULT_MIN_STEPS;
         state->max_steps = DEFAULT_MAX_STEPS;
-    
+
         /* Reset state */
-        _reset_state(state);    
+        _reset_state(state);
     }
 
     /* Initialize settings */
-    state = (step_counter_state_t *) *context_ptr;
+    state = (step_counter_state_t *) * context_ptr;
     if (state->settings == NULL) {
         uint8_t settings_page = 0;
         state->settings = malloc(NUM_SETTINGS * sizeof(step_counter_settings_t));
@@ -366,6 +380,7 @@ void step_counter_face_setup(uint8_t watch_face_index, void **context_ptr)
 
     /* Set up accelerometer */
     movement_set_accelerometer_background_rate(LIS2DW_DATA_RATE_12_5_HZ);
+    _lis2dw_print_state();
 
     /* Enable fifo and clear it. */
     lis2dw_enable_fifo();
@@ -395,13 +410,16 @@ bool step_counter_face_loop(movement_event_t event, void *context)
 
 void step_counter_face_resign(void *context)
 {
-    step_counter_state_t *state = (step_counter_state_t *) context;
+    (void) context;
 
+#if 0
+    step_counter_state_t *state = (step_counter_state_t *) context;
     /* Free allocated memory */
     if (state->settings != NULL) {
         free(state->settings);
         state->settings = NULL;
     }
+#endif
 }
 
 movement_watch_face_advisory_t step_counter_face_advise(void *context)
