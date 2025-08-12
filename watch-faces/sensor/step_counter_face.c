@@ -262,7 +262,6 @@ static void _detect_steps(step_counter_state_t *state)
             step2_too_long = (state->last_steps[0] - state->last_steps[1]) > state->max_steps;
 
             if (step1_too_long && step2_too_long) {
-                printf("Step too long\n");
                 state->steps--;
                 state->last_steps[0] = state->last_steps[1];
             }
