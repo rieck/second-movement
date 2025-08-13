@@ -179,8 +179,8 @@ static void _reset_state(step_counter_state_t *state)
     state->subticks = 0;
     state->steps = 0;
     state->above_threshold = false;
-    state->last_steps[0] = -state->min_steps;
-    state->last_steps[1] = -state->min_steps;
+    state->last_steps[0] = 0;
+    state->last_steps[1] = 0;
 }
 
 /* Approximate l2 norm */
@@ -256,7 +256,7 @@ static void _detect_steps(step_counter_state_t *state)
             state->above_threshold = false;
         }
 
-        /* Check if we should remove a step due to timing constraints */
+        /* Check if we should remove an isolated step */
         if (state->max_steps > 0) {
             step1_too_long = (state->subticks - state->last_steps[0]) > state->max_steps;
             step2_too_long = (state->last_steps[0] - state->last_steps[1]) > state->max_steps;
