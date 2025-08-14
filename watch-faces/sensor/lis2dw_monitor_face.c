@@ -569,8 +569,9 @@ void lis2dw_monitor_face_activate(void *context)
 {
     lis2dw_monitor_state_t *state = (lis2dw_monitor_state_t *) context;
 
-    /* Setup lis2dw to run in background at 12.5 Hz sampling rate. */
-    movement_set_accelerometer_background_rate(LIS2DW_DATA_RATE_12_5_HZ);
+    /* Setup lis2dw to run in background */
+    movement_set_accelerometer_background_rate(LIS2DW_DATA_RATE_25_HZ);
+    lis2dw_set_bandwidth_filtering(LIS2DW_BANDWIDTH_FILTER_DIV4);
 
     /* Enable fifo and clear it. */
     lis2dw_enable_fifo();
