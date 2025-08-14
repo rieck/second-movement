@@ -38,23 +38,22 @@ typedef struct {
 } step_counter_settings_t;
 
 typedef struct {
+    /* Displayed page */
     step_counter_page_t page;   /* Displayed page */
+    step_counter_settings_t *settings;  /* Settings config */
+    uint8_t settings_page:3;    /* Subpage in settings */
 
     /* Step detection data */
     uint32_t steps;             /* Number of steps taken */
-    uint8_t buffer[256];        /* Magnitude ring buffer */
-    uint8_t buffer_start;       /* Start index of buffer */
-    uint8_t buffer_end;         /* End index of buffer */
+    uint32_t subticks;          /* Subticks for timing */
+    uint32_t last_steps[2];     /* History of last two steps */
 
-    /* Step detection parameters */
+    /* Parameters for step detection */
     uint16_t threshold;         /* Threshold for step detection */
-    uint8_t max_duration;       /* Maximum duration of a step */
-    uint8_t window_bits;        /* Window size in bits */
-    uint8_t min_interval;       /* Minimum interval between steps */
+    uint8_t min_step;           /* Minimum time between steps */
+    uint8_t max_step;           /* Maximum time between steps */
 
-    /* Flexible settings */
-    step_counter_settings_t *settings;  /* Settings config */
-    uint8_t settings_page:3;    /* Subpage in settings */
+    /* Saved sensor config */
     lis2dw_data_rate_t prev_rate;       /* Accelerometer background rate */
     lis2dw_bandwidth_filtering_mode_t prev_bw;  /* Bandwidth filtering mode */
 } step_counter_state_t;
