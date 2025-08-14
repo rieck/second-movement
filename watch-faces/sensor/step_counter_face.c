@@ -32,10 +32,10 @@
 
 /* Default settings */
 #define SAMPLING_RATE 25        /* Sampling rate in Hz */
-#define DEFAULT_WINDOW_BITS 4   /* Window size is 2^4 = 16 samples */
+#define DEFAULT_WINDOW_BITS 3   /* Window size is 2^4 = 16 samples */
 #define DEFAULT_THRESHOLD 15    /* Threshold for step detection */
-#define DEFAULT_MAX_DURATION 4  /* Maximum duration of a step */
-#define DEFAULT_MIN_INTERVAL 8  /* Minimum interval between steps */
+#define DEFAULT_MAX_DURATION 8  /* Maximum duration of a step */
+#define DEFAULT_MIN_INTERVAL 4  /* Minimum interval between steps */
 
 static inline void _beep()
 {
@@ -81,7 +81,7 @@ static void _settings_threshold_advance(void *context)
     step_counter_state_t *state = (step_counter_state_t *) context;
     state->threshold++;
 
-    if (state->threshold > 40) {
+    if (state->threshold > 30) {
         state->threshold = 10;
     }
 }
@@ -104,8 +104,8 @@ static void _settings_max_duration_advance(void *context)
     step_counter_state_t *state = (step_counter_state_t *) context;
     state->max_duration++;
 
-    if (state->max_duration > 10) {
-        state->max_duration = 1;
+    if (state->max_duration > 15) {
+        state->max_duration = 0;
     }
 }
 
@@ -127,8 +127,8 @@ static void _settings_min_interval_advance(void *context)
     step_counter_state_t *state = (step_counter_state_t *) context;
     state->min_interval++;
 
-    if (state->min_interval > 20) {
-        state->min_interval = 1;
+    if (state->min_interval > 25) {
+        state->min_interval = 0;
     }
 }
 
@@ -315,20 +315,23 @@ static void _detect_steps(step_counter_state_t *state)
         if (hp_value > state->threshold && above_thres == 0) {
             above_thres = i;
         } else if (hp_value < state->threshold && above_thres > 0) {
-            bool step_too_long = (i - above_thres > state->max_duration);
-            bool step_too_early = (i - last_step < state->min_interval);
 
+            /* Check for too long steps (max_duration == 0 -> disabled) */
+            bool step_too_long = state->max_duration > 0 && (i - above_thres > state->max_duration);
             if (step_too_long) {
                 printf("Step too long at %d, ignoring\n", j);
             }
+
+            /* Check for too early steps (min_interval == 0 -> disabled) */
+            bool step_too_early = state->min_interval > 0 && (i - last_step < state->min_interval);
             if (step_too_early) {
                 printf("Step too early at %d, ignoring\n", j);
             }
 
             if (!step_too_long && !step_too_early) {
-                printf("Step detected at %d\n", j);
                 state->steps++;
                 last_step = i;
+                printf("Step detected at %d. Total steps: %lu\n", j, state->steps);
             }
             above_thres = 0;
         }
@@ -361,11 +364,7 @@ static bool _counter_loop(movement_event_t event, void *context)
 
             /* Record new accelerometer data */
             int8_t count = _record_data(state);
-            if (count < SAMPLING_RATE - 1) {
-                printf("Not enough samples collected anymore\n");
-            }
-
-            /* Run detection if every 10 seconds or not enough samples collected anymore */
+            /* Run detection if every 10 seconds or when not enough samples available */
             if (now.unit.second % 10 == 0 || count < SAMPLING_RATE - 1) {
                 _detect_steps(state);
             }
