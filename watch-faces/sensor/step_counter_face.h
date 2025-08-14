@@ -43,17 +43,20 @@ typedef struct {
     /* Step detection data */
     uint32_t steps;             /* Number of steps taken */
     uint8_t buffer[256];        /* Magnitude ring buffer */
-    uint8_t buffer_idx;         /* Index of the current element */
+    uint8_t buffer_start;       /* Start index of buffer */
+    uint8_t buffer_end;         /* End index of buffer */
 
     /* Step detection parameters */
     uint16_t threshold;         /* Threshold for step detection */
-    uint8_t max_step;           /* Maximum duration of a step */
-    uint8_t win_bits;           /* Window size in bits */
+    uint8_t max_duration;       /* Maximum duration of a step */
+    uint8_t window_bits;        /* Window size in bits */
+    uint8_t min_interval;       /* Minimum interval between steps */
 
     /* Flexible settings */
     step_counter_settings_t *settings;  /* Settings config */
     uint8_t settings_page:3;    /* Subpage in settings */
     lis2dw_data_rate_t prev_rate;       /* Accelerometer background rate */
+    lis2dw_bandwidth_filtering_mode_t prev_bw;  /* Bandwidth filtering mode */
 } step_counter_state_t;
 
 void step_counter_face_setup(uint8_t watch_face_index, void **context_ptr);

@@ -28,13 +28,14 @@
 #include "watch.h"
 
 /* Settings pages */
-#define NUM_SETTINGS 3
+#define NUM_SETTINGS 4
 
 /* Default settings */
 #define SAMPLING_RATE 25        /* Sampling rate in Hz */
-#define DEFAULT_WIN_BITS 4      /* Window size is 2^4 = 16 samples */
-#define DEFAULT_THRESHOLD 28    /* Threshold for step detection */
-#define DEFAULT_MAX_STEP 3      /* Maximum duration of a step */
+#define DEFAULT_WINDOW_BITS 4   /* Window size is 2^4 = 16 samples */
+#define DEFAULT_THRESHOLD 15    /* Threshold for step detection */
+#define DEFAULT_MAX_DURATION 4  /* Maximum duration of a step */
+#define DEFAULT_MIN_INTERVAL 8  /* Minimum interval between steps */
 
 static inline void _beep()
 {
@@ -80,62 +81,88 @@ static void _settings_threshold_advance(void *context)
     step_counter_state_t *state = (step_counter_state_t *) context;
     state->threshold++;
 
-    if (state->threshold > 50) {
-        state->threshold = 20;
+    if (state->threshold > 40) {
+        state->threshold = 10;
     }
 }
 
-static void _settings_max_step_display(void *context, uint8_t subsecond)
+static void _settings_max_duration_display(void *context, uint8_t subsecond)
 {
     char buf[10];
     step_counter_state_t *state = (step_counter_state_t *) context;
 
-    _settings_title_display(state, "MAXST", "MS");
+    _settings_title_display(state, "MAXDU", "MD");
     if (_settings_blink(subsecond))
         return;
 
-    snprintf(buf, sizeof(buf), "%4d  ", state->max_step);
+    snprintf(buf, sizeof(buf), "%4d  ", state->max_duration);
     watch_display_text_with_fallback(WATCH_POSITION_BOTTOM, buf, buf);
 }
 
-static void _settings_max_step_advance(void *context)
+static void _settings_max_duration_advance(void *context)
 {
     step_counter_state_t *state = (step_counter_state_t *) context;
-    state->max_step++;
+    state->max_duration++;
 
-    if (state->max_step > 10) {
-        state->max_step = 1;
+    if (state->max_duration > 10) {
+        state->max_duration = 1;
     }
 }
 
-static void _settings_win_bits_display(void *context, uint8_t subsecond)
+static void _settings_min_interval_display(void *context, uint8_t subsecond)
 {
     char buf[10];
     step_counter_state_t *state = (step_counter_state_t *) context;
 
-    _settings_title_display(state, "WINBI", "WB");
+    _settings_title_display(state, "MININ", "MI");
     if (_settings_blink(subsecond))
         return;
 
-    snprintf(buf, sizeof(buf), "%4d  ", state->win_bits);
+    snprintf(buf, sizeof(buf), "%4d  ", state->min_interval);
     watch_display_text_with_fallback(WATCH_POSITION_BOTTOM, buf, buf);
 }
 
-static void _settings_win_bits_advance(void *context)
+static void _settings_min_interval_advance(void *context)
 {
     step_counter_state_t *state = (step_counter_state_t *) context;
-    state->win_bits <<= 1;
+    state->min_interval++;
 
-    if (state->win_bits == 64) {
-        state->win_bits = 4;
+    if (state->min_interval > 20) {
+        state->min_interval = 1;
     }
 }
 
-static void _counter_display(step_counter_state_t *state)
+static void _settings_window_bits_display(void *context, uint8_t subsecond)
+{
+    char buf[10];
+    step_counter_state_t *state = (step_counter_state_t *) context;
+
+    _settings_title_display(state, "WINSZ", "WS");
+    if (_settings_blink(subsecond))
+        return;
+
+    snprintf(buf, sizeof(buf), "%4d  ", 1 << state->window_bits);
+    watch_display_text_with_fallback(WATCH_POSITION_BOTTOM, buf, buf);
+}
+
+static void _settings_window_bits_advance(void *context)
+{
+    step_counter_state_t *state = (step_counter_state_t *) context;
+    state->window_bits++;
+
+    if (state->window_bits == 6) {
+        state->window_bits = 1;
+    }
+}
+
+static void _counter_display(step_counter_state_t *state, uint8_t counter)
 {
     char buf[10];
 
     watch_display_text_with_fallback(WATCH_POSITION_TOP_LEFT, "STEPS", "SC");
+
+    snprintf(buf, sizeof(buf), "%2u", counter);
+    watch_display_text_with_fallback(WATCH_POSITION_TOP_RIGHT, buf, buf);
 
     /* Display step count */
     if (state->steps < 10000) {
@@ -156,7 +183,7 @@ static void _switch_to_counter(step_counter_state_t *state)
     watch_clear_colon();
     watch_display_text_with_fallback(WATCH_POSITION_TOP_RIGHT, "  ", "  ");
 
-    _counter_display(state);
+    _counter_display(state, 10);
 }
 
 static void _switch_to_settings(step_counter_state_t *state)
@@ -176,7 +203,8 @@ static void _reset_state(step_counter_state_t *state)
 
     /* Empty buffer */
     memset(state->buffer, 0, sizeof(state->buffer));
-    state->buffer_idx = 0;
+    state->buffer_start = 0;
+    state->buffer_end = 0;
 }
 
 /* Approximate l2 norm */
@@ -220,7 +248,7 @@ static int8_t _record_data(step_counter_state_t *state)
     lis2dw_read_fifo(&fifo);
     int8_t count = fifo.count;
 
-    printf("Recording %d samples to %d\n", count, state->buffer_idx);
+    printf("Recording %d samples to %d\n", count, state->buffer_end);
 
     /* Record data */
     for (uint8_t i = 0; i < count; i++) {
@@ -231,65 +259,85 @@ static int8_t _record_data(step_counter_state_t *state)
         mag >>= 8;
 
         /* Add to buffer */
-        state->buffer[state->buffer_idx] = mag;
-        state->buffer_idx++;
+        state->buffer[state->buffer_end] = mag;
+        state->buffer_end = (state->buffer_end + 1) % sizeof(state->buffer);
     }
     lis2dw_clear_fifo();
 
     return count;
 }
 
+/* Calculate distance between two indices in circular buffer */
+static inline uint8_t _buffer_dist(uint8_t i, uint8_t j, step_counter_state_t *state)
+{
+    return (j - i + sizeof(state->buffer)) % sizeof(state->buffer);
+}
+
 static void _detect_steps(step_counter_state_t *state)
 {
     uint8_t *window;
-    uint8_t window_idx = 0;
+    uint8_t j, win_size;
     uint32_t window_sum = 0;
-    uint8_t above_threshold = 0;
+    uint8_t above_thres = 0;
+    uint8_t last_step = 0;
 
-    printf("Detecting steps in %d samples\n", state->buffer_idx);
-    window = malloc((1 << state->win_bits) * sizeof(uint8_t));
+    /* Allocate window */
+    win_size = 1 << state->window_bits;
+    window = malloc(win_size * sizeof(uint8_t));
     if (window == NULL) {
         printf("Failed to allocate window\n");
         return;
     }
 
-    /* Count step */
-    state->steps++;
+    uint8_t size = _buffer_dist(state->buffer_start, state->buffer_end, state);
+    printf("Available samples: %d (from %d to %d)\n", size, state->buffer_start, state->buffer_end);
 
-    for (uint8_t i = 0; i < state->buffer_idx; i++) {
-
-        /* Add current value to window and sum */
-        window[window_idx] = state->buffer[i];
-        window_sum += window[window_idx];
-        window_idx = (window_idx + 1) % sizeof(window);
-
-        /* Wait until window is full */
-        if (i < sizeof(window)) {
-            continue;
-        }
-
-        /* Remove oldest value from sum */
-        window_sum -= window[window_idx];
-
-        /* High pass filter: hp_value = current - mean */
-        int32_t hp_value = state->buffer[i] - (window_sum >> state->win_bits);
-
-        /* Detect step */
-        if (hp_value > state->threshold && above_threshold == 0) {
-            above_threshold = i;
-        } else if (hp_value < state->threshold && above_threshold > 0) {
-            /* Check for sudden drop in acceleration */
-            if (i - above_threshold <= state->max_step) {
-                state->steps++;
-            }
-            above_threshold = 0;
-        }
+    /* Fill window with old data */
+    j = _buffer_dist(win_size, state->buffer_start, state);
+    for (uint8_t i = 0; i < win_size; i++) {
+        window[i] = state->buffer[j];
+        window_sum += window[i];
+        j = (j + 1) % sizeof(state->buffer);
     }
 
-    /* Reset buffer index */
-    state->buffer_idx = 0;
+    /* Process new data */
+    j = state->buffer_start;
+    for (uint8_t i = 0; i < size; i++) {
+        /* Remove oldest value and add new */
+        window_sum -= window[i % win_size];
+        window[i % win_size] = state->buffer[j];
+        window_sum += window[i % win_size];
 
-    /* Free window */
+        /* High pass filter: hp_value = current - mean */
+        int32_t hp_value = state->buffer[j] - (window_sum >> state->window_bits);
+
+        /* Detect step */
+        if (hp_value > state->threshold && above_thres == 0) {
+            above_thres = i;
+        } else if (hp_value < state->threshold && above_thres > 0) {
+            bool step_too_long = (i - above_thres > state->max_duration);
+            bool step_too_early = (i - last_step < state->min_interval);
+
+            if (step_too_long) {
+                printf("Step too long at %d, ignoring\n", j);
+            }
+            if (step_too_early) {
+                printf("Step too early at %d, ignoring\n", j);
+            }
+
+            if (!step_too_long && !step_too_early) {
+                printf("Step detected at %d\n", j);
+                state->steps++;
+                last_step = i;
+            }
+            above_thres = 0;
+        }
+
+        j = (j + 1) % sizeof(state->buffer);
+    }
+
+    /* Reset buffer and free window */
+    state->buffer_start = state->buffer_end;
     free(window);
 }
 
@@ -302,7 +350,7 @@ static bool _counter_loop(movement_event_t event, void *context)
 
     switch (event.event_type) {
         case EVENT_ACTIVATE:
-            _counter_display(state);
+            _counter_display(state, 10);
             break;
         case EVENT_TICK:
             /* Reset state at midnight */
@@ -311,16 +359,18 @@ static bool _counter_loop(movement_event_t event, void *context)
                 _reset_state(state);
             }
 
-            /* Record data */
+            /* Record new accelerometer data */
             int8_t count = _record_data(state);
-            bool buffer_full = (sizeof(state->buffer) - state->buffer_idx) < SAMPLING_RATE;
+            if (count < SAMPLING_RATE - 1) {
+                printf("Not enough samples collected anymore\n");
+            }
 
-            /* Run detection if buffer is full or no data is available anymore */
-            if (count == 0 || buffer_full) {
+            /* Run detection if every 10 seconds or not enough samples collected anymore */
+            if (now.unit.second % 10 == 0 || count < SAMPLING_RATE - 1) {
                 _detect_steps(state);
             }
 
-            _counter_display(state);
+            _counter_display(state, 10 - now.unit.second % 10);
             break;
         case EVENT_ALARM_LONG_PRESS:
             _switch_to_settings(state);
@@ -385,8 +435,9 @@ void step_counter_face_setup(uint8_t watch_face_index, void **context_ptr)
 
         /* Default setup */
         state->threshold = DEFAULT_THRESHOLD;
-        state->max_step = DEFAULT_MAX_STEP;
-        state->win_bits = DEFAULT_WIN_BITS;
+        state->max_duration = DEFAULT_MAX_DURATION;
+        state->min_interval = DEFAULT_MIN_INTERVAL;
+        state->window_bits = DEFAULT_WINDOW_BITS;
 
         /* Reset state */
         _reset_state(state);
@@ -400,17 +451,22 @@ void step_counter_face_setup(uint8_t watch_face_index, void **context_ptr)
         state->settings[settings_page].display = _settings_threshold_display;
         state->settings[settings_page].advance = _settings_threshold_advance;
         settings_page++;
-        state->settings[settings_page].display = _settings_max_step_display;
-        state->settings[settings_page].advance = _settings_max_step_advance;
+        state->settings[settings_page].display = _settings_max_duration_display;
+        state->settings[settings_page].advance = _settings_max_duration_advance;
         settings_page++;
-        state->settings[settings_page].display = _settings_win_bits_display;
-        state->settings[settings_page].advance = _settings_win_bits_advance;
+        state->settings[settings_page].display = _settings_min_interval_display;
+        state->settings[settings_page].advance = _settings_min_interval_advance;
+        settings_page++;
+        state->settings[settings_page].display = _settings_window_bits_display;
+        state->settings[settings_page].advance = _settings_window_bits_advance;
         settings_page++;
     }
 
     /* Set up accelerometer */
     state->prev_rate = movement_get_accelerometer_background_rate();
     movement_set_accelerometer_background_rate(LIS2DW_DATA_RATE_25_HZ);
+    state->prev_bw = lis2dw_get_bandwidth_filtering();
+    lis2dw_set_bandwidth_filtering(LIS2DW_BANDWIDTH_FILTER_DIV4);
     _lis2dw_print_state();
 
     /* Enable fifo and clear it. */
@@ -446,6 +502,7 @@ void step_counter_face_resign(void *context)
 
     /* Disable accelerometer */
     movement_set_accelerometer_background_rate(state->prev_rate);
+    lis2dw_set_bandwidth_filtering(state->prev_bw);
     _lis2dw_print_state();
 }
 
