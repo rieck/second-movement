@@ -371,9 +371,9 @@ void step_counter_face_setup(uint8_t watch_face_index, void **context_ptr)
     }
 
     /* Set up accelerometer */
-    state->prev_rate = movement_get_accelerometer_background_rate();
+    //state->prev_rate = movement_get_accelerometer_background_rate();
     movement_set_accelerometer_background_rate(LIS2DW_DATA_RATE_25_HZ);
-    state->prev_bw = lis2dw_get_bandwidth_filtering();
+    //state->prev_bw = lis2dw_get_bandwidth_filtering();
     lis2dw_set_bandwidth_filtering(LIS2DW_BANDWIDTH_FILTER_DIV4);
     _lis2dw_print_state();
 
@@ -408,8 +408,8 @@ void step_counter_face_resign(void *context)
     step_counter_state_t *state = (step_counter_state_t *) context;
 
     /* Disable accelerometer */
-    movement_set_accelerometer_background_rate(state->prev_rate);
-    lis2dw_set_bandwidth_filtering(state->prev_bw);
+    //movement_set_accelerometer_background_rate(state->prev_rate);
+    //lis2dw_set_bandwidth_filtering(state->prev_bw);
     _lis2dw_print_state();
 }
 
