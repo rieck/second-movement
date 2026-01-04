@@ -23,20 +23,26 @@
  */
 
 /*
- * This watch face tracks daily water intake.
+ * This watch face monitors daily hydration by tracking and logging water intake.
  * 
  * In tracking mode: Display current water intake and percentage
  * - Alarm button: +100ml (or configured glass size)
  * - Light button: -100ml (or configured glass size)
  * - Alarm long press: Display deviation from estimate
  * - Light long press: Switch to settings mode
+ * - Alarm really long press: Switch to log mode
  * 
  * In settings mode: Configure glass size, daily goal, wake time, sleep time, alert interval
  * - Light button: Switch to next setting
  * - Alarm button: Advance current setting
  * - Alarm long press: Reset to default value
  * - Mode button: Switch to tracking mode
- *
+
+ * In log mode: Display log entries of water intake, date and deviation from goal
+ * - Alarm button: Switch to next log entry
+ * - Light button: Cycle through intake, date and deviation
+ * - Mode button: Switch to tracking mode
+ * 
  * Background tasks:
  * - Automatic reset at wake time
  * - Alert if intake below estimate at sleep time

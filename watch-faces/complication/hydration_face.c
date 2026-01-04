@@ -252,6 +252,9 @@ static uint16_t _get_expected_intake(hydration_state_t *state, uint8_t hours_sin
 
 static void _log_intake(hydration_state_t *state, uint32_t ts)
 {
+    if (state->water_intake == 0)
+        return;
+
     state->log_head = (state->log_head + HYDRATION_LOG_ENTRIES - 1) % HYDRATION_LOG_ENTRIES;
     hydration_log_t *log = &state->log[state->log_head];
 
@@ -472,7 +475,8 @@ static bool _tracking_loop(movement_event_t event, void *context)
             _beep();
             break;
         case EVENT_ALARM_LONG_PRESS:
-            state->display_deviation = 2;       /* Display deviation for 1-2 seconds */
+            /* Display intake deviation for 2 seconds */
+            state->display_deviation = 2;
             _tracking_display(state);
             break;
         case EVENT_ALARM_REALLY_LONG_PRESS:
@@ -518,6 +522,9 @@ static bool _log_loop(movement_event_t event, void *context)
         case EVENT_MODE_BUTTON_UP:
             _switch_to_tracking(state);
             _beep();
+            break;
+        case EVENT_BACKGROUND_TASK:
+            _check_hydration_alert(state);
             break;
         case EVENT_TIMEOUT:
             movement_move_to_face(0);
@@ -630,23 +637,6 @@ void hydration_face_setup(uint8_t watch_face_index, void **context_ptr)
 
     /* Store face index for background tasks */
     state->face_index = watch_face_index;
-
-    /* Set up test entries for the log */
-    state->log[0].water_intake = 30;
-    state->log[0].date = 1735699200 / 86400;
-    state->log[1].water_intake = 40;
-    state->log[1].date = 1725612800 / 86400;
-    state->log[2].water_intake = 50;
-    state->log[2].date = 1715526400 / 86400;
-    state->log_head = 0;
-    state->log_index = 0;
-
-    state->water_intake = 2000;
-    _log_intake(state, 1745699200);
-    state->water_intake = 1000;
-    _log_intake(state, 1755612800);
-    state->water_intake = 500;
-    _log_intake(state, 1767476339);
 }
 
 void hydration_face_activate(void *context)
