@@ -25,6 +25,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include "hydration_face.h"
+#include "watch_slcd.h"
+#include "watch_utility.h"
 
 /* Display frequency */
 #define DISPLAY_FREQUENCY 1
@@ -248,6 +250,15 @@ static uint16_t _get_expected_intake(hydration_state_t *state, uint8_t hours_sin
     return expected_intake;
 }
 
+static void _log_intake(hydration_state_t *state, uint32_t ts)
+{
+    state->log_head = (state->log_head + HYDRATION_LOG_ENTRIES - 1) % HYDRATION_LOG_ENTRIES;
+    hydration_log_t *log = &state->log[state->log_head];
+
+    /* Log entry (intake / 100) and date (ts / 86400) */
+    log->water_intake = state->water_intake / 100;
+    log->date = ts / 86400;
+}
 
 static void _tracking_display(hydration_state_t *state)
 {
@@ -284,6 +295,63 @@ static void _tracking_display(hydration_state_t *state)
     }
 }
 
+#define _log_next_entry(state) _log_find_entry(state, +1)
+#define _log_prev_entry(state) _log_find_entry(state, -1)
+
+static uint8_t _log_find_entry(hydration_state_t *state, int direction)
+{
+    uint8_t start = state->log_index;
+    uint8_t step = (direction > 0) ? 1 : (HYDRATION_LOG_ENTRIES - 1);
+    uint8_t idx = (start + step) % HYDRATION_LOG_ENTRIES;
+
+    while (idx != start) {
+        if (state->log[idx].date != 0)
+            return idx;
+        idx = (idx + step) % HYDRATION_LOG_ENTRIES;
+    }
+    // If no other non-empty entries found, just return current
+    return start;
+}
+
+static void _log_display(hydration_state_t *state)
+{
+    char buf[10];
+    int16_t deviation;
+
+    watch_display_text_with_fallback(WATCH_POSITION_TOP_LEFT, "LOG", "LG");
+
+    hydration_log_t *log = &state->log[state->log_index];
+    if (log->date == 0) {
+        watch_display_text_with_fallback(WATCH_POSITION_BOTTOM, "no dat", "no dat");
+        return;
+    }
+
+    /* Calculate position in ring buffer (1 = most recent) */
+    uint8_t distance = (state->log_index - state->log_head + HYDRATION_LOG_ENTRIES) % HYDRATION_LOG_ENTRIES;
+    uint8_t index = distance + 1;
+
+    switch (state->log_type) {
+        case HYDRATION_LOG_INTAKE:
+            snprintf(buf, sizeof(buf), "%2d", index);
+            watch_display_text_with_fallback(WATCH_POSITION_TOP_RIGHT, buf, buf);
+            _display_water_ml(log->water_intake * 100);
+            break;
+        case HYDRATION_LOG_DEVIATION:
+            deviation = log->water_intake * 100 - state->water_goal;
+            snprintf(buf, sizeof(buf), "%s", deviation >= 0 ? " +" : " -");
+            watch_display_text_with_fallback(WATCH_POSITION_TOP_RIGHT, buf, buf);
+            _display_water_ml(abs(deviation));
+            break;
+        case HYDRATION_LOG_DATE:
+            snprintf(buf, sizeof(buf), "%2d", index);
+            watch_display_text_with_fallback(WATCH_POSITION_TOP_RIGHT, buf, buf);
+            watch_date_time_t now = watch_utility_date_time_from_unix_time(log->date * 86400, 0);
+            snprintf(buf, sizeof(buf), "%02d%02d%02d", now.unit.day, now.unit.month, now.unit.year + 20);
+            watch_display_text_with_fallback(WATCH_POSITION_BOTTOM, buf, buf);
+            break;
+    }
+}
+
 static void _switch_to_tracking(hydration_state_t *state)
 {
     movement_request_tick_frequency(DISPLAY_FREQUENCY);
@@ -294,6 +362,7 @@ static void _switch_to_tracking(hydration_state_t *state)
     watch_clear_indicator(WATCH_INDICATOR_24H);
     watch_clear_indicator(WATCH_INDICATOR_PM);
 
+    /* Display tracking data */
     _tracking_display(state);
 }
 
@@ -302,7 +371,22 @@ static void _switch_to_settings(hydration_state_t *state)
     movement_request_tick_frequency(4);
     state->page = PAGE_HYDRATION_SETTINGS;
     state->settings_page = HYDRATION_SETTING_WATER_GLASS;
+
+    /* Display current settings */
     state->settings[state->settings_page].display(state, 0);
+}
+
+static void _switch_to_log(hydration_state_t *state)
+{
+    movement_request_tick_frequency(DISPLAY_FREQUENCY);
+    state->page = PAGE_HYDRATION_LOG;
+
+    /* Set index to entry before tail */
+    state->log_index = state->log_head;
+    state->log_type = HYDRATION_LOG_INTAKE;
+
+    /* Display log data */
+    _log_display(state);
 }
 
 static void _check_hydration_alert(hydration_state_t *state)
@@ -390,6 +474,10 @@ static bool _tracking_loop(movement_event_t event, void *context)
         case EVENT_ALARM_LONG_PRESS:
             state->display_deviation = 2;       /* Display deviation for 1-2 seconds */
             _tracking_display(state);
+            break;
+        case EVENT_ALARM_REALLY_LONG_PRESS:
+            state->display_deviation = 0;
+            _switch_to_log(state);
             _beep();
             break;
         case EVENT_BACKGROUND_TASK:
@@ -403,6 +491,41 @@ static bool _tracking_loop(movement_event_t event, void *context)
             break;
     }
 
+    return true;
+}
+
+static bool _log_loop(movement_event_t event, void *context)
+{
+    hydration_state_t *state = (hydration_state_t *) context;
+
+    switch (event.event_type) {
+        case EVENT_ACTIVATE:
+        case EVENT_TICK:
+            _log_display(state);
+            break;
+        case EVENT_ALARM_BUTTON_UP:
+            state->log_index = _log_next_entry(state);
+            _log_display(state);
+            break;
+        case EVENT_LIGHT_BUTTON_UP:
+            state->log_type = (state->log_type + 1) % HYDRATION_LOG_TYPES;
+            _log_display(state);
+            _beep();
+            break;
+        case EVENT_LIGHT_BUTTON_DOWN:
+            /* Do nothing. No light */
+            break;
+        case EVENT_MODE_BUTTON_UP:
+            _switch_to_tracking(state);
+            _beep();
+            break;
+        case EVENT_TIMEOUT:
+            movement_move_to_face(0);
+            break;
+        default:
+            movement_default_loop_handler(event);
+            break;
+    }
     return true;
 }
 
@@ -507,6 +630,23 @@ void hydration_face_setup(uint8_t watch_face_index, void **context_ptr)
 
     /* Store face index for background tasks */
     state->face_index = watch_face_index;
+
+    /* Set up test entries for the log */
+    state->log[0].water_intake = 30;
+    state->log[0].date = 1735699200 / 86400;
+    state->log[1].water_intake = 40;
+    state->log[1].date = 1725612800 / 86400;
+    state->log[2].water_intake = 50;
+    state->log[2].date = 1715526400 / 86400;
+    state->log_head = 0;
+    state->log_index = 0;
+
+    state->water_intake = 2000;
+    _log_intake(state, 1745699200);
+    state->water_intake = 1000;
+    _log_intake(state, 1755612800);
+    state->water_intake = 500;
+    _log_intake(state, 1767476339);
 }
 
 void hydration_face_activate(void *context)
@@ -527,6 +667,8 @@ bool hydration_face_loop(movement_event_t event, void *context)
             return _tracking_loop(event, context);
         case PAGE_HYDRATION_SETTINGS:
             return _settings_loop(event, context);
+        case PAGE_HYDRATION_LOG:
+            return _log_loop(event, context);
     }
 }
 
@@ -540,9 +682,16 @@ movement_watch_face_advisory_t hydration_face_advise(void *context)
     hydration_state_t *state = (hydration_state_t *) context;
     movement_watch_face_advisory_t retval = { 0 };
 
-    /* Check for daily reset at wake time */
     watch_date_time_t now = movement_get_local_date_time();
+
+    /* Daily reset at wake time and log entry */
     if (now.unit.hour == state->wake_hour && now.unit.minute == 0) {
+        uint32_t ts = watch_utility_date_time_to_unix_time(now, 0);
+        /* Correct date if midnight between sleep and wake time */
+        if (state->wake_hour < state->sleep_hour)
+            ts -= 24 * 60 * 60;
+        _log_intake(state, ts);
+        /* Reset water intake */
         state->water_intake = 0;
     }
 
