@@ -428,6 +428,7 @@ static void _check_hydration_alert(hydration_state_t *state)
     uint16_t expected_intake = _get_expected_intake(state, hours_since_wake);
     if (state->water_intake < expected_intake) {
         movement_play_alarm();
+        movement_request_wake();
         movement_move_to_face(state->face_index);
     }
 }
