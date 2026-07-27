@@ -227,7 +227,7 @@ static void _correct_time_difference(int16_t *units, watch_date_time_t deadline)
 /* Increment date in settings mode. Function taken from `set_time_face.c` */
 static void _increment_date(deadline_state_t *state, watch_date_time_t date_time)
 {
-    const uint8_t days_in_month[12] = { 31, 28, 31, 30, 31, 30, 30, 31, 30, 31, 30, 31 };
+    const uint8_t days_in_month[12] = { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
 
     switch (state->current_page) {
         case 0:
