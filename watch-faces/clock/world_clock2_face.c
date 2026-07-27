@@ -321,6 +321,21 @@ static bool _clock_loop(movement_event_t event, world_clock2_state_t *state)
     return true;
 }
 
+/* Leave settings mode and return to the clock display */
+static void _exit_settings_mode(movement_event_t event, world_clock2_state_t *state)
+{
+    /* Find next selected zone */
+    if (!state->zones[state->current_zone].selected)
+        state->current_zone = _next_selected_zone(state, FORWARD);
+
+    /* Switch to display mode */
+    state->current_mode = WORLD_CLOCK2_MODE_CLOCK;
+    state->show_zone_name = NAME_DISPLAY_TIME;
+    refresh_face = true;
+    movement_request_tick_frequency(1);
+    _clock_display(event, state);
+}
+
 static bool _settings_loop(movement_event_t event, world_clock2_state_t *state)
 {
     uint8_t zone;
@@ -358,17 +373,11 @@ static bool _settings_loop(movement_event_t event, world_clock2_state_t *state)
             _settings_display(event, state);
             break;
         case EVENT_MODE_BUTTON_UP:
-            /* Find next selected zone */
-            if (!state->zones[state->current_zone].selected)
-                state->current_zone = _next_selected_zone(state, FORWARD);
-
-            /* Switch to display mode */
-            state->current_mode = WORLD_CLOCK2_MODE_CLOCK;
-            state->show_zone_name = NAME_DISPLAY_TIME;
-            refresh_face = true;
-            movement_request_tick_frequency(1);
-            _clock_display(event, state);
+            _exit_settings_mode(event, state);
             _beep(BEEP_BUTTON);
+            break;
+        case EVENT_TIMEOUT:
+            _exit_settings_mode(event, state);
             break;
         default:
             return movement_default_loop_handler(event);
