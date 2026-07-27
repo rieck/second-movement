@@ -227,8 +227,6 @@ static void _correct_time_difference(int16_t *units, watch_date_time_t deadline)
 /* Increment date in settings mode. Function taken from `set_time_face.c` */
 static void _increment_date(deadline_state_t *state, watch_date_time_t date_time)
 {
-    const uint8_t days_in_month[12] = { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
-
     switch (state->current_page) {
         case 0:
             /* Only 10 years covered. Fix this sometime next decade */
@@ -238,10 +236,7 @@ static void _increment_date(deadline_state_t *state, watch_date_time_t date_time
             date_time.unit.month = (date_time.unit.month % 12) + 1;
             break;
         case 2: {
-            /* Check for leap years */
-            uint8_t days = days_in_month[date_time.unit.month - 1];
-            if (date_time.unit.month == 2 && _is_leap(date_time.unit.year))
-                days++;
+            int days = _days_in_month(date_time.unit.month, date_time.unit.year);
 
             /* Compute next day outside the 5-bit bitfield so overflow past 31
              * can be compared against `days` before it gets truncated. */
