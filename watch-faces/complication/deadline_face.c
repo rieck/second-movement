@@ -237,17 +237,18 @@ static void _increment_date(deadline_state_t *state, watch_date_time_t date_time
         case 1:
             date_time.unit.month = (date_time.unit.month % 12) + 1;
             break;
-        case 2:
-            date_time.unit.day = date_time.unit.day + 1;
-
+        case 2: {
             /* Check for leap years */
-            int8_t days = days_in_month[date_time.unit.month - 1];
+            uint8_t days = days_in_month[date_time.unit.month - 1];
             if (date_time.unit.month == 2 && _is_leap(date_time.unit.year))
                 days++;
 
-            if (date_time.unit.day > days)
-                date_time.unit.day = 1;
+            /* Compute next day outside the 5-bit bitfield so overflow past 31
+             * can be compared against `days` before it gets truncated. */
+            uint8_t day = date_time.unit.day + 1;
+            date_time.unit.day = (day > days) ? 1 : day;
             break;
+        }
         case 3:
             date_time.unit.hour = (date_time.unit.hour + 1) % 24;
             break;
