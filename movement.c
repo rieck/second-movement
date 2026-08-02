@@ -928,6 +928,14 @@ bool movement_set_accelerometer_motion_threshold(uint8_t new_threshold) {
     return false;
 }
 
+bool movement_get_wake_on_motion(void) {
+    return movement_state.wake_on_motion;
+}
+
+void movement_set_wake_on_motion(bool value) {
+    movement_state.wake_on_motion = value;
+}
+
 float movement_get_temperature(void) {
     float temperature_c = (float)0xFFFFFFFF;
 #if __EMSCRIPTEN__
@@ -1064,6 +1072,11 @@ void app_init(void) {
 
     if (movement_state.accelerometer_motion_threshold == 0) movement_state.accelerometer_motion_threshold = 32;
 
+    // support for wake on motion. if enabled motion will wake the watch from
+    // low-energy mode. this feature is off by default but can be enabled from the
+    // accelerometer status face.
+    movement_state.wake_on_motion = false;
+
     movement_state.signal_volume = MOVEMENT_DEFAULT_SIGNAL_VOLUME;
     movement_state.alarm_volume = MOVEMENT_DEFAULT_ALARM_VOLUME;
     movement_state.light_on = false;
@@ -1156,9 +1169,12 @@ void app_setup(void) {
             lis2dw_configure_int2(LIS2DW_CTRL5_INT2_SLEEP_STATE | LIS2DW_CTRL5_INT2_SLEEP_CHG);
             HAL_GPIO_A4_in();
 
-            // Wake on motion seemed like a good idea when the threshold was lower, but the UX makes less sense now.
-            // Still if you want to wake on motion, you can do it by uncommenting this line:
-            // watch_register_extwake_callback(HAL_GPIO_A4_pin(), cb_accelerometer_wake, false);
+            // Wake on motion: a falling edge on A4 (accelerometer stationary->moving) wakes the watch
+            // and resets the LE inactivity countdown via cb_accelerometer_wake().
+            // This uses the SLEEP_CHG transition interrupt configured above, so sustained motion
+            // produces one wake edge only, not a continuous interrupt stream. Going back to sleep is
+            // left to the normal LE inactivity timeout.
+            watch_register_extwake_callback(HAL_GPIO_A4_pin(), cb_accelerometer_wake, false);
 
             // later on, we are going to use INT1 for tap detection. We'll set up that interrupt here,
             // but it will only fire once tap recognition is enabled.
@@ -1565,6 +1581,14 @@ void cb_accelerometer_event(void) {
 
 void cb_accelerometer_wake(void) {
     movement_volatile_state.pending_events |= 1 << EVENT_ACCELEROMETER_WAKE;
-    // also: wake up!
-    _movement_reset_inactivity_countdown();
+
+    if (!movement_state.wake_on_motion) return;
+
+    // Only request a full wake while actually in low-energy sleep; doing it while
+    // awake would latch exit_sleep_mode and abort the next sleep entry.
+    if (movement_volatile_state.is_sleeping) {
+        movement_request_wake();
+    } else {
+        _movement_reset_inactivity_countdown();
+    }
 }
