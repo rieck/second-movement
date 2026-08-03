@@ -285,6 +285,12 @@ bool lis2dw_read_fifo(lis2dw_fifo_t *fifo_data, uint32_t timeout) {
 
     fifo_data->count = temp & LIS2DW_FIFO_SAMPLE_COUNT;
 
+    /* The count field can report up to 63, but readings[] only holds 32.
+       Clamp so a glitched or overrun count can't overflow the buffer. */
+    if (fifo_data->count > 32) {
+        fifo_data->count = 32;
+    }
+
     rtc_counter_t timeout_counter = watch_rtc_get_counter() + timeout;
     for(int i = 0; i < fifo_data->count; i++) {
         if (watch_rtc_get_counter() > timeout_counter) {
