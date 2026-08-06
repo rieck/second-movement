@@ -166,6 +166,23 @@ lis2dw_mode_t lis2dw_get_mode(void) {
 #endif
 }
 
+// returns the output data rate (ODR) in Hz
+float lis2dw_get_data_rate_hz(void) {
+    switch (lis2dw_get_data_rate()) {
+        case LIS2DW_DATA_RATE_LOWEST:
+            return (lis2dw_get_mode() == LIS2DW_MODE_HIGH_PERFORMANCE) ? 12.5f : 1.6f;
+        case LIS2DW_DATA_RATE_12_5_HZ:    return 12.5f;
+        case LIS2DW_DATA_RATE_25_HZ:      return 25.0f;
+        case LIS2DW_DATA_RATE_50_HZ:      return 50.0f;
+        case LIS2DW_DATA_RATE_100_HZ:     return 100.0f;
+        case LIS2DW_DATA_RATE_200_HZ:     return 200.0f;
+        case LIS2DW_DATA_RATE_HP_400_HZ:  return 400.0f;
+        case LIS2DW_DATA_RATE_HP_800_HZ:  return 800.0f;
+        case LIS2DW_DATA_RATE_HP_1600_HZ: return 1600.0f;
+        default:                          return 0.0f;
+    }
+}
+
 void lis2dw_set_low_power_mode(lis2dw_low_power_mode_t mode) {
 #ifdef I2C_SERCOM
     uint8_t val = watch_i2c_read8(LIS2DW_ADDRESS, LIS2DW_REG_CTRL1) & ~(0b11);
@@ -368,6 +385,26 @@ void lis2dw_configure_6d_threshold(uint8_t threshold) {
 #endif
 }
 
+// duration is a 4-bit value (0-15)
+void lis2dw_configure_sleep_duration(uint8_t duration) {
+#ifdef I2C_SERCOM
+    uint8_t configuration = watch_i2c_read8(LIS2DW_ADDRESS, LIS2DW_REG_WAKE_UP_DUR) & 0b11110000;
+    watch_i2c_write8(LIS2DW_ADDRESS, LIS2DW_REG_WAKE_UP_DUR, configuration | (duration & 0b00001111));
+#else
+    (void)duration;
+#endif
+}
+
+// duration is a 2-bit value (0-3)
+void lis2dw_configure_wake_duration(uint8_t duration) {
+#ifdef I2C_SERCOM
+    uint8_t configuration = watch_i2c_read8(LIS2DW_ADDRESS, LIS2DW_REG_WAKE_UP_DUR) & 0b10011111;
+    watch_i2c_write8(LIS2DW_ADDRESS, LIS2DW_REG_WAKE_UP_DUR, configuration | ((duration & 0b11) << 5));
+#else
+    (void)duration;
+#endif
+}
+
 void lis2dw_configure_tap_threshold(uint8_t threshold_x, uint8_t threshold_y, uint8_t threshold_z, uint8_t axes_to_enable) {
 #ifdef I2C_SERCOM
     (void) threshold_x;
@@ -491,6 +528,24 @@ lis2dw_interrupt_source_t lis2dw_get_interrupt_source(void) {
 uint8_t lis2dw_get_wakeup_threshold(void) {
 #ifdef I2C_SERCOM
     return watch_i2c_read8(LIS2DW_ADDRESS, LIS2DW_REG_WAKE_UP_THS) & 0b00111111;
+#else
+    return 0;
+#endif
+}
+
+// value is in units of 512 / ODR seconds (0 means 16 / ODR)
+uint8_t lis2dw_get_sleep_duration(void) {
+#ifdef I2C_SERCOM
+    return watch_i2c_read8(LIS2DW_ADDRESS, LIS2DW_REG_WAKE_UP_DUR) & 0b00001111;
+#else
+    return 0;
+#endif
+}
+
+// value is in units of 1 / ODR seconds
+uint8_t lis2dw_get_wake_duration(void) {
+#ifdef I2C_SERCOM
+    return (watch_i2c_read8(LIS2DW_ADDRESS, LIS2DW_REG_WAKE_UP_DUR) >> 5) & 0b11;
 #else
     return 0;
 #endif
