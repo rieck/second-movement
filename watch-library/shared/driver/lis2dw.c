@@ -277,26 +277,32 @@ inline void lis2dw_disable_fifo(void) {
 #endif
 }
 
-bool lis2dw_read_fifo(lis2dw_fifo_t *fifo_data, uint32_t timeout) {
-    // timeout is in terms of 1/RTC_CNT_HZ seconds (likely 128 timeouts is one second)
+bool lis2dw_read_fifo(lis2dw_fifo_t *fifo_data) {
 #ifdef I2C_SERCOM
     uint8_t temp = watch_i2c_read8(LIS2DW_ADDRESS, LIS2DW_REG_FIFO_SAMPLE);
     bool overrun = !!(temp & LIS2DW_FIFO_SAMPLE_OVERRUN);
 
     fifo_data->count = temp & LIS2DW_FIFO_SAMPLE_COUNT;
 
-    rtc_counter_t timeout_counter = watch_rtc_get_counter() + timeout;
-    for(int i = 0; i < fifo_data->count; i++) {
-        if (watch_rtc_get_counter() > timeout_counter) {
-            break;
-        }
-        fifo_data->readings[i] = lis2dw_get_raw_reading();
+    /* The count field can report up to 63, but readings[] only holds 32.
+       Clamp so a glitched or overrun count can't overflow the buffer. */
+    if (fifo_data->count > 32) {
+        fifo_data->count = 32;
+    }
+
+    /* Read the whole FIFO in one burst. With address auto-increment (IF_ADD_INC)
+       the pointer walks OUT_X_L..OUT_Z_H and rolls over into the next FIFO slot,
+       so count*6 bytes returns the samples back-to-back. On this little-endian
+       target the raw bytes map straight onto lis2dw_reading_t (x, y, z int16). */
+    if (fifo_data->count > 0) {
+        uint8_t reg = LIS2DW_REG_OUT_X_L | 0x80;
+        watch_i2c_send(LIS2DW_ADDRESS, &reg, 1);
+        watch_i2c_receive(LIS2DW_ADDRESS, (uint8_t *) fifo_data->readings, fifo_data->count * 6);
     }
 
     return overrun;
 #else
     (void) fifo_data;
-    (void) timeout;
     return false;
 #endif
 }
