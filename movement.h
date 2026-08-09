@@ -408,6 +408,8 @@ bool movement_set_accelerometer_background_rate(lis2dw_data_rate_t new_rate);
 uint8_t movement_get_accelerometer_motion_threshold(void);
 bool movement_set_accelerometer_motion_threshold(uint8_t new_threshold);
 
+#define MOVEMENT_HAS_WAKE_ON_MOTION
+
 // gets and sets the wake on motion feature
 bool movement_get_wake_on_motion(void);
 void movement_set_wake_on_motion(bool value);
