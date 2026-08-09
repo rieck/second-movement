@@ -1253,7 +1253,7 @@ static void _sleep_mode_app_loop(void) {
 static bool _movement_accelerometer_in_motion(void) {
     if (!movement_state.wake_on_motion || !movement_state.has_lis2dw) return false;
     if (movement_state.accelerometer_background_rate == LIS2DW_DATA_RATE_POWERDOWN) return false;
-    return !(lis2dw_get_wakeup_source() & LIS2DW_WAKEUP_SRC_SLEEP_STATE);
+    return !HAL_GPIO_A4_read();
 }
 
 static bool _switch_face(void) {
