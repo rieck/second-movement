@@ -69,6 +69,9 @@ typedef struct {
     uint8_t show_title:6;       /* Display face title */
 } lis2dw_monitor_state_t;
 
+/* Read the current device configuration into ds. */
+void lis2dw_get_state(lis2dw_device_state_t *ds);
+
 void lis2dw_monitor_face_setup(uint8_t watch_face_index, void **context_ptr);
 void lis2dw_monitor_face_activate(void *context);
 bool lis2dw_monitor_face_loop(movement_event_t event, void *context);
