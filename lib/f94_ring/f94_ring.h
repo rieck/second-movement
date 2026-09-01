@@ -51,6 +51,10 @@
  * while the source is displayed. Registering on a watch without
  * f94_clock_face is harmless, since nothing calls the source.
  *
+ * Registering the same source twice is harmless: the entry is updated in
+ * place and keeps its id. This matters because movement calls setup() again
+ * after every wake from deep sleep.
+ *
  * There are two modes of operation: F94_RING_FILL and F94_RING_DOUBLE. The
  * former fills the ring and stops there (5 steps), the latter fills the ring
  * and then clears it again (10 steps).

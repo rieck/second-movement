@@ -356,7 +356,6 @@ void f94_clock_face_setup(uint8_t watch_face_index, void **context_ptr)
     state->ring_source = F94_RING_OFF;
     state->ring_shown = F94_LEVEL_UNKNOWN;
 
-    /* Registered first, so their place in the list is independent of the lineup. */
     f94_ring_register("60SEC ", _level_minute, NULL, F94_RING_FILL);
     f94_ring_register(" 5SEC ", _level_seconds, NULL, F94_RING_DOUBLE);
 

@@ -42,15 +42,28 @@ static uint8_t _count = 1;
 
 void f94_ring_register(const char *name, f94_ring_source_t source, void *context, f94_ring_mode_t mode)
 {
-    if (_count >= F94_RING_ENTRIES || source == NULL)
+    if (source == NULL)
         return;
 
-    _entries[_count].name = name;
-    _entries[_count].source = source;
-    _entries[_count].context = context;
-    _entries[_count].mode = mode;
+    /* Faces register from setup(), which movement calls again after every
+     * wake from deep sleep. A known source is thus updated in place, so that
+     * the table does not fill up with one copy per wake. */
+    uint8_t id;
+    for (id = 1; id < _count; id++) {
+        if (_entries[id].source == source && _entries[id].context == context)
+            break;
+    }
 
-    _count++;
+    if (id >= F94_RING_ENTRIES)
+        return;
+
+    _entries[id].name = name;
+    _entries[id].source = source;
+    _entries[id].context = context;
+    _entries[id].mode = mode;
+
+    if (id == _count)
+        _count++;
 }
 
 uint8_t f94_ring_scale(uint32_t value, uint32_t max)
