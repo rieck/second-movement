@@ -29,10 +29,13 @@
  *
  * An alternative step counter for Sensor Watch. Steps are detected with a
  * simple heuristic over the LIS2DW accelerometer data, which is faster than
- * common step-counting libraries. The counter runs in the background and pauses
- * tracking when there is no movement. For now it only tracks the current step
- * count and does not keep a history. Sampling runs at 25 Hz, which gave
- * significantly better results than lower rates.
+ * common step-counting libraries. A candidate peak has to clear an amplitude
+ * threshold, rise slowly enough to look like a stride rather than a flick of
+ * the wrist, and belong to a run of rhythmic steps. The counter runs in the
+ * background and pauses tracking when there is no movement. For now it only
+ * tracks the current step count and does not keep a history. Sampling runs at
+ * 25 Hz, which gave significantly better results than lower rates; the
+ * rise-time test in particular does not survive a lower rate.
  *
  * The design goal is to keep changes to the movement core small and build the
  * feature mostly as a watch face. Background counting is done by chaining
@@ -55,11 +58,20 @@ typedef enum {
 
 /* Settings pages, in the order they are built in setup() */
 typedef enum {
+    STEP_COUNTER2_SETTING_DAILY_GOAL,
     STEP_COUNTER2_SETTING_THRESHOLD,
     STEP_COUNTER2_SETTING_MIN_STEP,
     STEP_COUNTER2_SETTING_MAX_STEP,
     STEP_COUNTER2_SETTING_MIN_STREAK,
+    STEP_COUNTER2_SETTING_MAX_RISE,
 } step_counter2_setting_t;
+
+/* Length of the rise-time window, in samples, and the history needed to form
+ * its differences. Unlike the other parameters this one is fixed at compile
+ * time: it measures the rise of the step impulse itself and so follows the
+ * sample rate, not the cadence. */
+#define STEP_COUNTER2_RISE_WIN 7
+#define STEP_COUNTER2_RISE_HIST (STEP_COUNTER2_RISE_WIN + 1)
 
 /* Setting display and advance functions */
 typedef struct {
@@ -78,12 +90,18 @@ typedef struct {
     uint32_t last_step;         /* Subtick of the previous detected step */
     bool have_last_step;        /* Whether last_step holds a valid step */
     uint16_t streak_len;        /* Length of the current rhythmic streak */
+    uint8_t mag_hist[STEP_COUNTER2_RISE_HIST];  /* Recent magnitudes, for the rise gate */
+    uint8_t mag_idx;            /* Ring buffer write position, and thus oldest entry */
+
+    /* Steps that make a day */
+    uint16_t daily_goal;        /* Daily step goal */
 
     /* Parameters for step detection */
     uint16_t threshold;         /* Threshold for step detection */
     uint8_t min_step;           /* Minimum time between two steps */
     uint8_t max_step;           /* Maximum gap between two steps in a streak */
     uint8_t min_streak;         /* Required streak of consecutive steps to count */
+    uint8_t max_rise;           /* Max climb into a peak, percent of peak height */
 
     /* Day-of-month of the last daily reset (0 until first tick) */
     uint8_t last_reset_day;

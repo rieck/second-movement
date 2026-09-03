@@ -29,22 +29,20 @@
 #include "watch_utility.h"
 
 /* Number of settings pages */
-#define NUM_SETTINGS 4
+#define NUM_SETTINGS 6
 
 /* Default settings.
  *
- * Calibrated with stepcounter-devel (threshold_bound_n, L2 magnitude),
- * averaging the two cross-validation folds of the best run. Values depend on
- * the sample rate, so pick the set matching the rate configured in setup().
- * See https://github.com/rieck/stepcounter-devel for details.
- *
- *   25 Hz  / BW-DIV4 (active):  threshold 103, min_step 10, max_step 38, min_streak 8
- *   12.5 Hz / BW-DIV2:          threshold 100, min_step  4, max_step 30, min_streak 7
+ * The values follow the sample rate configured in setup() and have to be
+ * adjusted if it changes. They can all be changed at runtime on the settings
+ * pages of the face.
  */
-#define DEFAULT_THRESHOLD 103
-#define DEFAULT_MIN_STEP 10
-#define DEFAULT_MAX_STEP 38
-#define DEFAULT_MIN_STREAK 8
+#define DEFAULT_DAILY_GOAL 10000
+#define DEFAULT_THRESHOLD 94
+#define DEFAULT_MIN_STEP 9
+#define DEFAULT_MAX_STEP 30
+#define DEFAULT_MIN_STREAK 7
+#define DEFAULT_MAX_RISE 19
 
 /* Sleep duration: how long the accelerometer must be motionless before its A4
  * pin flags "still". This is the debounced "stopped moving" signal that lets
@@ -97,6 +95,30 @@ static bool _settings_blink(uint8_t subsecond)
         return true;
     }
     return false;
+}
+
+static void _settings_daily_goal_display(void *context, uint8_t subsecond)
+{
+    char buf[10];
+    step_counter2_state_t *state = (step_counter2_state_t *) context;
+
+    _settings_title_display(state, "GOAL ", "GO");
+    if (_settings_blink(subsecond))
+        return;
+
+    snprintf(buf, sizeof(buf), "%5d ", state->daily_goal);
+    watch_display_text_with_fallback(WATCH_POSITION_BOTTOM, buf, buf);
+}
+
+static void _settings_daily_goal_advance(void *context)
+{
+    step_counter2_state_t *state = (step_counter2_state_t *) context;
+    /* Goals of 1000..20000 steps, in steps of 1000. */
+    state->daily_goal += 1000;
+
+    if (state->daily_goal > 20000) {
+        state->daily_goal = 1000;
+    }
 }
 
 static void _settings_threshold_display(void *context, uint8_t subsecond)
@@ -192,11 +214,44 @@ static void _settings_min_streak_advance(void *context)
     }
 }
 
+static void _settings_max_rise_display(void *context, uint8_t subsecond)
+{
+    char buf[10];
+    step_counter2_state_t *state = (step_counter2_state_t *) context;
+
+    _settings_title_display(state, "RISE", "RI");
+    if (_settings_blink(subsecond))
+        return;
+
+    snprintf(buf, sizeof(buf), "%4d  ", state->max_rise);
+    watch_display_text_with_fallback(WATCH_POSITION_BOTTOM, buf, buf);
+}
+
+static void _settings_max_rise_advance(void *context)
+{
+    step_counter2_state_t *state = (step_counter2_state_t *) context;
+    state->max_rise++;
+
+    /* Percent of the peak height. Measured medians are 10-14 for walking and
+     * 16-26 for hand motion, so the useful range sits in between; 40 is loose
+     * enough to pass essentially everything. */
+    if (state->max_rise > 40) {
+        state->max_rise = 5;
+    }
+}
+
 static void _counter_display(step_counter2_state_t *state)
 {
     char buf[12];
+    uint8_t percent;
 
     watch_display_text_with_fallback(WATCH_POSITION_TOP_LEFT, "STEPS", "SC");
+
+    /* Display progress towards the daily goal in the date field, in tens of
+     * percent, so that 10 is the goal reached. */
+    percent = (state->steps * 10) / state->daily_goal;
+    snprintf(buf, sizeof(buf), "%2d", percent);
+    watch_display_text_with_fallback(WATCH_POSITION_TOP_RIGHT, buf, buf);
 
     /* Display step count */
     if (state->steps < 10000) {
@@ -238,6 +293,8 @@ static void _reset_state(step_counter2_state_t *state)
     state->last_step = 0;
     state->have_last_step = false;
     state->streak_len = 0;
+    memset(state->mag_hist, 0, sizeof(state->mag_hist));
+    state->mag_idx = 0;
 }
 
 /* Reset the count when the day rolls over. Keying on the day (not an exact
@@ -299,6 +356,39 @@ static void _lis2dw_print_state(void)
             lis2dw_get_filter_type(), lis2dw_get_low_noise_mode());
 }
 
+/* Steepest climb over the last STEP_COUNTER2_RISE_WIN samples.
+ *
+ * The wrist tells walking from housework by the shape of a peak, not by its
+ * timing: an arm swing is a smooth pendulum, so the climb into a heel strike
+ * stays shallow next to the peak it reaches, while the jerky movements of
+ * dressing or tying laces rise much faster. Measured over the recordings, the
+ * median climb is 10-14 percent of the peak height for every walking pace and
+ * 16-26 percent for hand motion.
+ *
+ * The window is a time and not a sample count. Its optimum sits at 200 ms and
+ * holds over roughly 120-280 ms, and it does not move when the other
+ * parameters are varied, so it follows the sample rate alone. At 25 Hz that is
+ * the 7 samples of STEP_COUNTER2_RISE_WIN. Sampled slower it stops working:
+ * decimated to 12.5 Hz the separation disappears at every window size, since
+ * a 200 ms rise leaves only two or three samples to measure.
+ */
+static uint8_t _peak_rise(step_counter2_state_t *state)
+{
+    /* mag_idx is the next write position, so it is also the oldest sample. */
+    uint8_t prev = state->mag_hist[state->mag_idx];
+    uint8_t best = 0;
+
+    for (uint8_t k = 1; k < STEP_COUNTER2_RISE_HIST; k++) {
+        uint8_t cur = state->mag_hist[(state->mag_idx + k) % STEP_COUNTER2_RISE_HIST];
+        /* Rises only; the comparison also guards the unsigned subtraction. */
+        if (cur > prev && (uint8_t) (cur - prev) > best)
+            best = cur - prev;
+        prev = cur;
+    }
+
+    return best;
+}
+
 static void _detect_steps(step_counter2_state_t *state)
 {
     lis2dw_fifo_t fifo;
@@ -311,6 +401,14 @@ static void _detect_steps(step_counter2_state_t *state)
         mag = (mag > 0xffff) ? 0xffff : mag;
         mag >>= 8;
 
+        /* Record every sample, including the ones skipped below: the rise gate
+         * needs an uninterrupted history to measure the climb against. The
+         * clamp is redundant while mag is derived as above, but truncating a
+         * saturated peak instead of clamping it would read as a near-full-scale
+         * rise and silently suppress the steps that follow it. */
+        state->mag_hist[state->mag_idx] = (mag > 0xff) ? 0xff : (uint8_t) mag;
+        state->mag_idx = (state->mag_idx + 1) % STEP_COUNTER2_RISE_HIST;
+
         /* Only threshold crossings are candidate steps */
         if (mag <= state->threshold)
             goto skip;
@@ -319,6 +417,15 @@ static void _detect_steps(step_counter2_state_t *state)
          * soon after the previous step is ignored. */
         if (state->have_last_step && state->subticks - state->last_step < state->min_step)
             goto skip;
+
+        /* Reject peaks that rise too abruptly to be a stride. Integer form of
+         * rise / mag > max_rise / 100. Until the history has filled after a
+         * reset the buffer still holds zeros, which reads as a steep rise and
+         * drops the first few candidates; that is the safe direction. */
+        if (_peak_rise(state) * 100 > state->max_rise * mag) {
+            dprintf("peak rejected (rise=%u, mag=%lu)", _peak_rise(state), (unsigned long) mag);
+            goto skip;
+        }
 
         /* Decide whether this step continues the current rhythmic streak or
          * starts a new one. A streak continues while the gap to the previous
@@ -412,6 +519,9 @@ static bool _settings_loop(movement_event_t event, void *context)
         case EVENT_ALARM_LONG_PRESS:
             /* Reset the current setting to its default value */
             switch (state->settings_page) {
+                case STEP_COUNTER2_SETTING_DAILY_GOAL:
+                    state->daily_goal = DEFAULT_DAILY_GOAL;
+                    break;
                 case STEP_COUNTER2_SETTING_THRESHOLD:
                     state->threshold = DEFAULT_THRESHOLD;
                     break;
@@ -423,6 +533,9 @@ static bool _settings_loop(movement_event_t event, void *context)
                     break;
                 case STEP_COUNTER2_SETTING_MIN_STREAK:
                     state->min_streak = DEFAULT_MIN_STREAK;
+                    break;
+                case STEP_COUNTER2_SETTING_MAX_RISE:
+                    state->max_rise = DEFAULT_MAX_RISE;
                     break;
             }
             state->settings[state->settings_page].display(context, event.subsecond);
@@ -454,10 +567,12 @@ void step_counter2_face_setup(uint8_t watch_face_index, void **context_ptr)
         state = (step_counter2_state_t *) *context_ptr;
 
         /* Default setup */
+        state->daily_goal = DEFAULT_DAILY_GOAL;
         state->threshold = DEFAULT_THRESHOLD;
         state->min_step = DEFAULT_MIN_STEP;
         state->max_step = DEFAULT_MAX_STEP;
         state->min_streak = DEFAULT_MIN_STREAK;
+        state->max_rise = DEFAULT_MAX_RISE;
 
         /* Reset state */
         _reset_state(state);
@@ -468,6 +583,9 @@ void step_counter2_face_setup(uint8_t watch_face_index, void **context_ptr)
     if (state->settings == NULL) {
         uint8_t settings_page = 0;
         state->settings = malloc(NUM_SETTINGS * sizeof(step_counter2_settings_t));
+        state->settings[settings_page].display = _settings_daily_goal_display;
+        state->settings[settings_page].advance = _settings_daily_goal_advance;
+        settings_page++;
         state->settings[settings_page].display = _settings_threshold_display;
         state->settings[settings_page].advance = _settings_threshold_advance;
         settings_page++;
@@ -479,6 +597,9 @@ void step_counter2_face_setup(uint8_t watch_face_index, void **context_ptr)
         settings_page++;
         state->settings[settings_page].display = _settings_min_streak_display;
         state->settings[settings_page].advance = _settings_min_streak_advance;
+        settings_page++;
+        state->settings[settings_page].display = _settings_max_rise_display;
+        state->settings[settings_page].advance = _settings_max_rise_advance;
         settings_page++;
     }
 
